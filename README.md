@@ -28,8 +28,12 @@ Chroma Studio effect files** on whatever Razer devices you own today.
   - animations flow across a shared desk layout (keyboard → mouse → mousepad).
 - **Keyboard underglow / side lighting** via the SDK's extended keyboard grid.
 - **Smooth output:** soft gradient edges and per-LED easing between frames.
-- Per-device on/off, optional start with Windows (minimized), settings saved
-  between runs, single instance.
+- **Runs in the system tray**, like Synapse: closing the window keeps your
+  lighting on. Click the tray icon to reopen it; right-click → Exit to quit.
+- Option to turn off key-press lighting (reactive / ripple layers) in effect
+  files.
+- Per-device on/off, optional start with Windows (in the tray), settings saved
+  between runs, single instance (launching it again reopens the window).
 - Small: one `.exe`, or two Python files using only the standard library.
 
 ## Requirements
@@ -54,9 +58,13 @@ Windows SmartScreen may warn about an unsigned app the first time; choose
   effect; the two colors apply to the built-in effects.
 - **Import…** adds `.ChromaEffects` files (Chroma Studio's export format). They
   appear in the list as `File: <name>`. **Folder** opens where they're stored.
-- **Minimize** ChromaLite to keep your lighting. **Closing** it hands lighting
-  back to Synapse.
-- Tick **Start with Windows (minimized)** to launch it at sign-in.
+- **Closing** the window hides ChromaLite to the system tray and your lighting
+  stays on. Click the tray icon to reopen it, or right-click it → **Exit** to
+  quit (lighting then goes back to Synapse). Untick **Keep running in the tray
+  when closed** if you'd rather the close button quit.
+- Untick **Light up keys when pressed** to stop effect files lighting up keys
+  as you type.
+- Tick **Start with Windows (in the tray)** to launch it at sign-in.
 
 Settings and imported effects live in `%APPDATA%\ChromaLite`.
 
@@ -105,6 +113,7 @@ folder first: `$env:CHROMALITE_VENV = "C:\clb"`.
   document of layers → regions → device cells), the retargeting onto your
   devices, the layer renderers, plus key-press polling and the Windows audio
   peak meter used by the reactive, ripple and audio-meter layers.
+- `tray.py` — the system tray icon (Win32 API via ctypes, no extra packages).
 - `tools/make_icon.py` — generates the app icon.
 
 ## License

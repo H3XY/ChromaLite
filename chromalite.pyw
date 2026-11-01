@@ -14,6 +14,7 @@ import json
 import math
 import os
 import random
+import queue
 import shutil
 import sys
 import threading
@@ -23,6 +24,7 @@ from tkinter import colorchooser, filedialog, ttk
 from urllib.parse import urlparse
 
 import chroma_effects as ce
+import tray
 
 APP_NAME = "ChromaLite"
 SDK_HOST, SDK_PORT = "localhost", 54235
@@ -51,6 +53,9 @@ DEFAULTS = {
     "brightness": 100,
     "speed": 5,
     "devices": {"keyboard": True, "mouse": True, "mousepad": True},
+    "keypress_effects": True,  # reactive / ripple layers in effect files
+    "close_to_tray": True,
+    "tray_hint_shown": False,
 }
 
 
@@ -258,7 +263,7 @@ class Engine(threading.Thread):
             self.audio = ce.AudioMeter()
         k = s["speed"] / 5
         self.file_time += dt * k
-        presses = self.keys.poll() if r.needs_keys else ()
+        presses = self.keys.poll() if r.needs_keys and s["keypress_effects"] else ()
         level = self.audio.level() if r.needs_audio else 0.0
         return r.render(self.file_time, dt * k, presses, level)
 
@@ -408,17 +413,30 @@ class App:
                            selectcolor=PANEL, activebackground=BG, activeforeground=FG,
                            font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
 
-        # Startup
+        # Options
+        self.section("Options")
+        self.keypress = tk.BooleanVar(value=s["keypress_effects"])
+        self.option(root, "Light up keys when pressed (effect files)", self.keypress,
+                    lambda: self.push(keypress_effects=self.keypress.get()))
+        self.to_tray = tk.BooleanVar(value=s["close_to_tray"])
+        self.option(root, "Keep running in the tray when closed", self.to_tray, self.tray_option_changed)
         self.startup = tk.BooleanVar(value=os.path.exists(STARTUP_VBS))
-        tk.Checkbutton(root, text="Start with Windows (minimized)", variable=self.startup, command=self.toggle_startup,
-                       bg=BG, fg=MUTED, selectcolor=PANEL, activebackground=BG, activeforeground=FG,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(14, 2), **pad)
-        tk.Label(root, text="Closing this window hands lighting back to Synapse. Minimize to keep it running.",
-                 bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left").pack(anchor="w", pady=(0, 14), **pad)
+        self.option(root, "Start with Windows (in the tray)", self.startup, self.toggle_startup)
+        self.close_hint = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left")
+        self.close_hint.pack(anchor="w", pady=(4, 14), **pad)
+        self.update_close_hint()
+
+        self.ui_queue = queue.Queue()
+        self.tray = tray.Tray(ICON_PATH, APP_NAME, lambda: self.ui_queue.put("open"), lambda: self.ui_queue.put("exit"))
+        self.tray_ok = self.tray.start()
 
         self.tick()
 
     # widgets
+    def option(self, parent, text, var, command):
+        tk.Checkbutton(parent, text=text, variable=var, command=command, bg=BG, fg=FG, selectcolor=PANEL,
+                       activebackground=BG, activeforeground=FG, font=("Segoe UI", 9)).pack(anchor="w", padx=16)
+
     def section(self, text):
         tk.Label(self.root, text=text.upper(), bg=BG, fg=MUTED, font=("Segoe UI Semibold", 8)).pack(anchor="w", padx=16, pady=(12, 4))
 
@@ -539,7 +557,33 @@ class App:
 
     hold_status_until = 0.0
 
+    def tray_option_changed(self):
+        self.push(close_to_tray=self.to_tray.get())
+        self.update_close_hint()
+
+    def update_close_hint(self):
+        if self.to_tray.get():
+            text = "Closing the window keeps your lighting on from the tray. Right-click the tray icon → Exit to quit."
+        else:
+            text = "Closing the window quits ChromaLite and hands lighting back to Synapse."
+        self.close_hint.config(text=text)
+
+    def show(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
     def tick(self):
+        while not self.ui_queue.empty():
+            action = self.ui_queue.get_nowait()
+            if action == "open":
+                self.show()
+            elif action == "exit":
+                self.quit()
+                return
+        if self.root.state() == "withdrawn":  # hidden in the tray: nothing to draw
+            self.root.after(150, self.tick)
+            return
         if time.time() > self.hold_status_until:
             self.status_lbl.config(text=self.engine.status)
         c = self.preview
@@ -550,8 +594,21 @@ class App:
             c.create_rectangle(i * w + 1, 2, (i + 1) * w - 1, 24, fill=rgb_to_hex(col), outline="")
         self.root.after(60, self.tick)
 
+    def hide_to_tray(self):
+        self.root.withdraw()
+
     def on_close(self):
+        if not (self.tray_ok and self.to_tray.get()):
+            self.quit()
+            return
+        self.hide_to_tray()
+        if not self.engine.snapshot()["tray_hint_shown"]:
+            self.tray.notify("ChromaLite is still running", "Your lighting stays on. Right-click the tray icon to exit.")
+            self.push(tray_hint_shown=True)
+
+    def quit(self):
         save_settings(self.engine.snapshot())
+        self.tray.stop()
         self.engine.stop_evt.set()
         self.engine.dirty.set()
         self.engine.join(timeout=3)
@@ -577,15 +634,20 @@ def already_running():
 
 def main():
     if already_running():
-        ctypes.windll.user32.MessageBoxW(None, "ChromaLite is already running.", APP_NAME, 0x40)
+        # Launching again (e.g. from the Start menu) brings the running copy back.
+        if not tray.show_existing_instance():
+            ctypes.windll.user32.MessageBoxW(None, "ChromaLite is already running.", APP_NAME, 0x40)
         return
     migrate_legacy_config()
     engine = Engine(load_settings())
     engine.start()
     root = tk.Tk()
-    App(root, engine)
+    app = App(root, engine)
     if "--minimized" in sys.argv:
-        root.iconify()
+        if app.tray_ok:
+            app.hide_to_tray()
+        else:
+            root.iconify()
     root.mainloop()
 
 
