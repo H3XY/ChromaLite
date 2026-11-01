@@ -23,77 +23,6 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 
-def to_bgr(c, bright):
-    r, g, b = (max(0, min(255, int(v * bright))) for v in c)
-    return (b << 16) | (g << 8) | r
-
-
-# =============================================================== your devices
-class Led:
-    """One LED: gx/gy = position on the shared desk layout (in key widths),
-    u/v = position within its own device (0..1), key = SDK (row, col) for keys."""
-    __slots__ = ("gx", "gy", "u", "v", "key")
-
-    def __init__(self, gx, gy, u, v, key=None):
-        self.gx, self.gy, self.u, self.v, self.key = gx, gy, u, v, key
-
-
-def _grid(rows, cols, x0, y0, w, h, keys=False):
-    out = []
-    for r in range(rows):
-        for c in range(cols):
-            u, v = (c + 0.5) / cols, (r + 0.5) / rows
-            out.append(Led(x0 + u * w, y0 + v * h, u, v, (r, c) if keys else None))
-    return out
-
-
-def _perimeter(n, x0, y0, w, h):
-    """LEDs running down the right edge, along the bottom, then up the left."""
-    total, out = 2 * h + w, []
-    for i in range(n):
-        d = (i + 0.5) * total / n
-        if d < h:
-            x, y = x0 + w, y0 + d
-        elif d < h + w:
-            x, y = x0 + w - (d - h), y0 + h
-        else:
-            x, y = x0, y0 + h - (d - h - w)
-        out.append(Led(x, y, (x - x0) / w, (y - y0) / h))
-    return out
-
-
-class Device:
-    def __init__(self, kind, label, leds, build):
-        self.kind, self.label, self.leds, self._build = kind, label, leds, build
-
-    def payload(self, colors, bright):
-        return self._build([to_bgr(c, bright) for c in colors])
-
-
-KB_KEYS = 6 * 22
-
-
-def _kb_payload(b):
-    keys, glow = b[:KB_KEYS], b[KB_KEYS:]
-    return {"effect": "CHROMA_CUSTOM2", "param": {
-        "color": [glow[r * 24:(r + 1) * 24] for r in range(8)],
-        "key": [[k | 0x01000000 for k in keys[r * 22:(r + 1) * 22]] for r in range(6)],
-    }}
-
-
-def make_devices():
-    """Chroma SDK device grids laid out like a desk: keyboard, then mouse on its pad."""
-    return {
-        # 6x22 key grid (exact per-key) + 8x24 extended grid (underglow, sides)
-        "keyboard": Device("keyboard", "Keyboard",
-                           _grid(6, 22, 0, 0, 22, 6, keys=True) + _grid(8, 24, -0.5, -0.5, 23, 7), _kb_payload),
-        "mouse": Device("mouse", "Mouse", _grid(9, 7, 27, 0.5, 4, 6),
-                        lambda b: {"effect": "CHROMA_CUSTOM2", "param": [b[r * 7:(r + 1) * 7] for r in range(9)]}),
-        "mousepad": Device("mousepad", "Mousepad", _perimeter(20, 23.5, -0.5, 11, 8),
-                           lambda b: {"effect": "CHROMA_CUSTOM2", "param": b}),
-    }
-
-
 # =============================================================== key tables
 # Razer LedId (IBM PC key number) -> Chroma SDK keyboard (row, col)
 LEDID_TO_KEY = {110: (0, 1), 124: (0, 15), 125: (0, 16), 126: (0, 17),
@@ -413,8 +342,8 @@ class RegionRT:
                 self.data[kind] = [[random.uniform(-1, 1), l.v] for l in leds]
             elif e in ("reactive", "ripple"):
                 self.data[kind] = [l.key for l in leds]
-        kb = self.data.get("keyboard", []) if e in ("reactive", "ripple") else []
-        self.keyset = {k for k in kb if k}
+        # every keyboard key this region covers, on any device
+        self.keyset = {k for keys in self.data.values() for k in keys if k} if e in ("reactive", "ripple") else set()
         self.pressed = {}   # reactive: key -> time
         self.ripples = []   # ripple: (x, y, t0)
         self.level = self.peak_hold = 0.0
@@ -503,21 +432,20 @@ class RegionRT:
             for key in presses:
                 if key in self.keyset:
                     self.pressed[key] = t
-            if not self.pressed or "keyboard" not in self.members:
+            self.pressed = {k: t0 for k, t0 in self.pressed.items() if t - t0 < self.dur}
+            if not self.pressed:
                 return
             c0 = self.reg.colors[0] if self.reg.colors else (255, 255, 255, 1.0)
             c1 = self.reg.colors[1] if len(self.reg.colors) > 1 else (0, 0, 0, 0.0)
-            px = out["keyboard"]
-            for i, key in zip(self.members["keyboard"], self.data["keyboard"]):
-                t0 = self.pressed.get(key)
-                if t0 is None:
-                    continue
-                k = 1 - (t - t0) / self.dur
-                if k <= 0:
-                    del self.pressed[key]
-                    continue
-                c = _lerp4(c1, c0, k)
-                _blend(px[i], (c[0], c[1], c[2], c[3] * k), la)
+            for kind, idx in self.members.items():
+                px = out[kind]
+                for i, key in zip(idx, self.data[kind]):
+                    t0 = self.pressed.get(key) if key else None
+                    if t0 is None:
+                        continue
+                    k = 1 - (t - t0) / self.dur
+                    c = _lerp4(c1, c0, k)
+                    _blend(px[i], (c[0], c[1], c[2], c[3] * k), la)
         elif e == "ripple":
             any_key = self.reg.params.get("Start", "").lower() == "onkeypress"
             for key in presses:

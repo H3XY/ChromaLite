@@ -1,91 +1,99 @@
-# ChromaLite
+# Prismatic
 
-A lightweight lighting controller for Razer Chroma devices on Windows — a small
-alternative to the Synapse lighting UI that can also play your old **Synapse 3
-Chroma Studio effect files** on whatever Razer devices you own today.
+*Formerly ChromaLite.*
 
-> ChromaLite is an independent project. It is not affiliated with, endorsed by,
-> or supported by Razer Inc. "Razer", "Chroma" and "Synapse" are trademarks of
-> Razer Inc.
+A lightweight lighting app for gaming keyboards, mice and mousepads on
+Windows. Control Razer devices without the Synapse interface, light up devices
+from other brands through Windows Dynamic Lighting, and play your old
+**Synapse 3 Chroma Studio effects** on any of them.
+
+> Prismatic is an independent project. It is not affiliated with, endorsed by,
+> or supported by Razer Inc. or any other device maker. "Razer", "Chroma" and
+> "Synapse" are trademarks of Razer Inc.; other names are trademarks of their
+> owners.
 
 ## Features
 
+- **Works across brands**
+  - **Razer** devices through the Razer Chroma SDK that comes with Synapse —
+    including while Prismatic runs in the background.
+  - **Logitech, Corsair, SteelSeries, HyperX, ASUS and more** through Windows 11
+    **Dynamic Lighting**, for any device that supports it.
+  - A device is only ever controlled one way: Razer devices use Synapse when
+    it's installed, and fall back to Dynamic Lighting when it isn't.
 - **Built-in effects:** Static, Breathing, Duo Pulse, Spectrum Cycle, Rainbow
-  Wave, Gradient Wave, Starlight, Off — with two colors, quick presets,
-  brightness and speed.
+  Wave, Gradient Wave, Starlight, Off — with colors, brightness and speed.
 - **Plays Chroma Studio exports (`.ChromaEffects`)**, including layered effects
-  with transparency: static, wave, spectrum, starlight, fire, color wheel,
-  reactive (keys light when pressed), ripple, and audio meter (follows what
-  your PC is playing).
-- **Retargets effects to your hardware.** Effects made for other devices still
-  work:
-  - keyboard keys are matched by identity, so a WASD highlight made on a
-    Huntsman lands on WASD on a BlackWidow;
-  - other LEDs are matched by relative position (mouse to mouse, mousepad to
-    mousepad);
-  - device types the effect never targeted borrow its keyboard layout, so your
-    whole setup lights up;
-  - animations flow across a shared desk layout (keyboard → mouse → mousepad).
-- **Per-device effects:** give the keyboard, mouse and mousepad each their own
-  effect, colors, brightness and speed — or let them all share one.
-- **Keyboard underglow / side lighting** via the SDK's extended keyboard grid.
-- **Smooth output:** soft gradient edges and per-LED easing between frames.
-- **Runs in the system tray**, like Synapse: closing the window keeps your
-  lighting on. Click the tray icon to reopen it; right-click → Exit to quit.
-- Option to turn off key-press lighting (reactive / ripple layers) in effect
-  files.
-- Per-device on/off, optional start with Windows (in the tray), settings saved
-  between runs, single instance (launching it again reopens the window).
-- Small: one `.exe`, or two Python files using only the standard library.
+  with transparency: static, wave, spectrum, starlight, fire, color wheel, key
+  press, ripple and audio meter. Effects are remapped onto whatever devices you
+  have: keys by identity (so a WASD highlight lands on WASD on any keyboard),
+  everything else by position.
+- **Per-device effects:** give each device its own effect, colors, brightness
+  and speed, or let them all sync to one.
+- **Live previews** of every device in the app, an **effect library** with
+  color thumbnails, and smooth, flicker-free output.
+- **Runs in the system tray** like Synapse: closing the window keeps your
+  lighting on. Optional start with Windows. One instance at a time.
 
 ## Requirements
 
-- Windows 10 or 11.
-- Razer Synapse installed, with the **Razer Chroma SDK** services running.
-  ChromaLite talks to the Chroma SDK's local REST server
-  (`http://localhost:54235`), not to the hardware directly. The Synapse
-  *window* itself doesn't need to work or be open.
+- Windows 10 or 11 (Dynamic Lighting devices need Windows 11).
+- For Razer devices: Razer Synapse installed, with its **Razer Chroma SDK**
+  services running. The Synapse window itself doesn't need to work or be open.
+- Microsoft Edge WebView2 Runtime (built into Windows 11; most Windows 10 PCs
+  already have it).
 
 ## Install
 
-Download `ChromaLite.exe` from the
-[Releases](../../releases) page and run it. No installer, no Python needed.
+Download `Prismatic.exe` from the [Releases](../../releases) page and run it.
+No installer, no Python needed.
 
 Windows SmartScreen may warn about an unsigned app the first time; choose
 **More info → Run anyway**.
 
-## Usage
+## Using it
 
-- Pick an effect from the **Effect** list. Brightness and speed apply to every
-  effect; the two colors apply to the built-in effects.
-- To give one device a different effect, click its tab (**Keyboard**,
-  **Mouse** or **Mousepad**) and tick **Give this device its own effect**. The
-  controls then change only that device; tabs with their own effect show a •.
-  Untick it to make the device follow **All devices** again.
-- **Import…** adds `.ChromaEffects` files (Chroma Studio's export format). They
-  appear in the list as `File: <name>`. **Folder** opens where they're stored.
-- **Closing** the window hides ChromaLite to the system tray and your lighting
-  stays on. Click the tray icon to reopen it, or right-click it → **Exit** to
-  quit (lighting then goes back to Synapse). Untick **Keep running in the tray
-  when closed** if you'd rather the close button quit.
-- Untick **Light up keys when pressed** to stop effect files lighting up keys
-  as you type.
-- Tick **Start with Windows (in the tray)** to launch it at sign-in.
+- **Devices** shows everything Prismatic is lighting, with live previews.
+  Each device has an on/off switch; click a device to customize it.
+- **Lighting** sets the effect for **All devices**. On a device's own page,
+  turn off **Sync with All devices** to give it a different effect.
+- **Effect Library** holds your Chroma Studio effects: **Import effects** adds
+  `.ChromaEffects` files, and each can be applied to all devices or picked per
+  device under *Chroma Studio effects*.
+- **Settings**: start with Windows, keep running in the tray, key-press
+  lighting, and the status of each device source.
 
-Settings and imported effects live in `%APPDATA%\ChromaLite`.
+Closing the window keeps Prismatic in the system tray. Click the tray icon to
+reopen it, or right-click → **Exit** to quit (lighting then goes back to
+Synapse / Windows).
+
+Settings and imported effects live in `%APPDATA%\Prismatic` (carried over automatically from ChromaLite).
+
+## About Dynamic Lighting devices
+
+Windows only lets the app **in the foreground** control Dynamic Lighting
+devices (background control is reserved for apps installed from a package
+with special permission). So non-Razer devices follow Prismatic while its
+window is active, and Windows takes them back otherwise; the app shows these
+devices as *Paused* meanwhile. Razer devices aren't affected — they're
+controlled through Synapse in the background.
 
 ## Troubleshooting
 
 **Lights hyper-flash, even on a solid color.** Another program is fighting over
-your Razer devices. The usual culprits are ASUS Armoury Crate / Aura Sync, other
-RGB suites (SignalRGB, OpenRGB, iCUE, …) and Windows Dynamic Lighting. Exit the
-other program and/or stop it controlling your Razer devices: in Windows, check
-*Settings → Personalization → Dynamic Lighting* (background light control and
-each Razer device's "Use Dynamic Lighting on my devices" toggle).
+your devices. The usual culprits are ASUS Armoury Crate / Aura Sync, other RGB
+suites (SignalRGB, OpenRGB, iCUE, G HUB, …) and Windows Dynamic Lighting's own
+effects. Exit the other program or stop it controlling those devices; in
+Windows, check *Settings → Personalization → Dynamic Lighting*.
 
-**Status says "Chroma SDK not reachable".** The Razer Chroma SDK services aren't
-running. Reinstall or repair Synapse, or start the *Razer Chroma SDK Server*
-service.
+**Razer Chroma shows "Razer Synapse not found".** The Razer Chroma SDK services
+aren't running. Reinstall or repair Synapse, or start the *Razer Chroma SDK
+Server* service.
+
+**A device isn't listed.** Razer devices need Synapse; other brands need
+Windows 11 Dynamic Lighting support (check *Settings → Personalization →
+Dynamic Lighting* — if the device isn't listed there, Windows can't control
+it).
 
 **A Chroma Studio effect looks different from how it did in Synapse.** The
 `.ChromaEffects` format is undocumented, so some timings (wave speed and width,
@@ -94,10 +102,11 @@ attached are welcome.
 
 ## Run or build from source
 
-Run directly (Python 3.10+, no packages needed):
+Requires Python 3.10+.
 
 ```
-pyw chromalite.pyw
+pip install -r requirements.txt
+pyw prismatic.pyw
 ```
 
 Build the single-file `.exe` into `dist\` (creates a local build environment
@@ -108,18 +117,26 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 If pip fails with a long-path error, point the build environment at a shorter
-folder first: `$env:CHROMALITE_VENV = "C:\clb"`.
+folder first: `$env:PRISMATIC_VENV = "C:\clb"`.
 
 ## How it works
 
-- `chromalite.pyw` — the window, settings, built-in effects and the render
-  loop. It registers with the Chroma SDK, then streams per-LED frames
-  (`CHROMA_CUSTOM2`) at 30 fps with a heartbeat to keep the session alive.
+- `prismatic.pyw` — app entry: the window (an HTML interface shown with
+  pywebview / WebView2), the bridge the interface calls, the tray and startup.
+- `ui/` — the interface (HTML, CSS, JavaScript; no frameworks).
+- `engine.py` — settings, built-in effects and the render loop: collects
+  devices from every backend, works out each one's effect and streams frames
+  at 30 fps.
+- `devices.py` — the device model every backend produces: LEDs with positions
+  on a shared desk layout, so effects flow across devices.
+- `backend_razer.py` — Razer devices via the Chroma SDK REST API
+  (`CHROMA_CUSTOM2` frames, heartbeat), with device names from Windows.
+- `backend_dynlight.py` — any brand via Windows Dynamic Lighting (LampArray),
+  using each lamp's real position and key mapping.
 - `chroma_effects.py` — the `.ChromaEffects` reader (a zip holding one XML
   document of layers → regions → device cells), the retargeting onto your
-  devices, the layer renderers, plus key-press polling and the Windows audio
-  peak meter used by the reactive, ripple and audio-meter layers.
-- `tray.py` — the system tray icon (Win32 API via ctypes, no extra packages).
+  devices, the layer renderers, plus key-press polling and the audio meter.
+- `tray.py` — the tray icon (Win32 API via ctypes).
 - `tools/make_icon.py` — generates the app icon.
 
 ## License

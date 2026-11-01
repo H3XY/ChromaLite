@@ -1,0 +1,10 @@
+# Needed to run Prismatic from source (the .exe bundles these).
+pywebview==6.2.1
+winrt-runtime==3.2.1
+winrt-Windows.Devices.Enumeration==3.2.1
+winrt-Windows.Devices.Lights==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Foundation.Numerics==3.2.1
+winrt-Windows.System==3.2.1
+winrt-Windows.UI==3.2.1
