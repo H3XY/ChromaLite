@@ -43,6 +43,7 @@ DEFAULTS = {
     "close_to_tray": True,
     "tray_hint_shown": False,
     "dynamic_lighting": True,
+    "usb_control": True,  # control Razer devices directly when Synapse isn't available
 }
 
 
@@ -115,10 +116,10 @@ def save_settings(s):
 
 # ---------------------------------------------------------------- engine
 class Engine(threading.Thread):
-    def __init__(self, settings, razer, dynlight):
+    def __init__(self, settings, razer, dynlight, razer_usb):
         super().__init__(daemon=True, name="engine")
         self.settings = settings
-        self.razer, self.dynlight = razer, dynlight
+        self.razer, self.dynlight, self.razer_usb = razer, dynlight, razer_usb
         self.lock = threading.Lock()
         self.stop_evt = threading.Event()
         self.dirty = threading.Event()
@@ -130,6 +131,7 @@ class Engine(threading.Thread):
         self.keys, self.audio = None, None
         self.smoothed = {}
         dynlight.enabled = settings["dynamic_lighting"]
+        razer_usb.enabled = settings["usb_control"]
 
     # settings ----------------------------------------------------------
     def update(self, **changes):
@@ -137,6 +139,8 @@ class Engine(threading.Thread):
             self.settings.update(changes)
         if "dynamic_lighting" in changes:
             self.dynlight.enabled = bool(changes["dynamic_lighting"])
+        if "usb_control" in changes:
+            self.razer_usb.enabled = bool(changes["usb_control"])
         self.dirty.set()
 
     def update_profile(self, target, changes):
@@ -172,10 +176,17 @@ class Engine(threading.Thread):
         return dict(s["overrides"].get(dev_id) or {k: s[k] for k in PROFILE_KEYS})
 
     def current_devices(self):
-        devs = self.razer.devices()
-        # A device must only have one controller: Razer devices go through Synapse when it's there.
-        skip = {RAZER_VID} if self.razer.connected else set()
-        devs += self.dynlight.devices(exclude_vendors=skip)
+        """Every device gets exactly one controller: Razer devices go through Synapse when it's
+        there, otherwise directly over USB; Dynamic Lighting covers whatever's left."""
+        if self.razer.connected:
+            self.razer_usb.wanted = False
+            devs = self.razer.devices()
+            skip_vendors, skip_products = {RAZER_VID}, set()
+        else:
+            self.razer_usb.wanted = True
+            devs = self.razer_usb.devices()
+            skip_vendors, skip_products = set(), {(d.vendor_id, d.product_id) for d in devs}
+        devs += self.dynlight.devices(exclude_vendors=skip_vendors, exclude_products=skip_products)
         return {d.id: d for d in devs}
 
     # smoothing -----------------------------------------------------------
@@ -274,7 +285,8 @@ class Engine(threading.Thread):
             now = time.time()
             dt, last = min(0.25, now - last), now
             devs = self.current_devices()
-            if set(devs) != set(self.device_map):
+            # same ids can come from a different controller (e.g. Synapse -> direct USB), so compare objects
+            if {i: id(d) for i, d in devs.items()} != {i: id(d) for i, d in self.device_map.items()}:
                 self.device_map = devs
                 self.renderers.clear()  # effect files are compiled against the device set
                 for gone in set(self.colors) - set(devs):

@@ -25,6 +25,7 @@ import engine as en
 import tray
 from backend_dynlight import DynamicLightingBackend
 from backend_razer import RazerBackend
+from backend_razer_usb import RazerUsbBackend
 
 APP_NAME = "Prismatic"
 APP_VERSION = "2.0.0"
@@ -150,10 +151,15 @@ class Api:
                 "keypress_effects": s["keypress_effects"],
                 "close_to_tray": s["close_to_tray"],
                 "dynamic_lighting": s["dynamic_lighting"],
+                "usb_control": s["usb_control"],
                 "start_with_windows": startup_enabled(),
             },
             "sources": [
-                {"name": "Razer Chroma", "ok": self._app.razer.connected, "status": self._app.razer.status},
+                {"name": "Razer Chroma", "ok": self._app.razer.connected, "status": self._app.razer.status,
+                 "standby": self._app.razer_usb.active},  # not needed while direct USB has Razer devices covered
+                {"name": "Razer direct USB", "ok": self._app.razer_usb.active,
+                 "standby": self._app.razer.connected and s["usb_control"],
+                 "status": self._app.razer_usb.status if s["usb_control"] else "Turned off"},
                 self._dynlight_source(s, devs),
             ],
             "errors": [eng.file_errors[n] for n in sorted(in_use) if n in eng.file_errors],
@@ -168,7 +174,7 @@ class Api:
         used = [d for d in devs if d.source == name]
         if found and not used:  # only Razer devices, which go through Synapse instead
             return {"name": name, "ok": True,
-                    "status": f"{len(found)} device{'s' if len(found) != 1 else ''} found, all controlled through Razer Chroma instead"}
+                    "status": f"{len(found)} device{'s' if len(found) != 1 else ''} found, all handled by a Razer source instead"}
         if used:
             return {"name": name, "ok": True, "status": f"Controlling {len(used)} device{'s' if len(used) != 1 else ''}"}
         return {"name": name, "ok": False, "status": self._app.dynlight.status}
@@ -248,7 +254,7 @@ class Api:
             except OSError:
                 pass
             return self.get_state()
-        if key in ("keypress_effects", "close_to_tray", "dynamic_lighting"):
+        if key in ("keypress_effects", "close_to_tray", "dynamic_lighting", "usb_control"):
             self._app.engine.update(**{key: bool(value)})
         return self._saved()
 
@@ -305,7 +311,8 @@ class App:
     def __init__(self, minimized):
         self.razer = RazerBackend(APP_NAME)
         self.dynlight = DynamicLightingBackend()
-        self.engine = en.Engine(en.load_settings(), self.razer, self.dynlight)
+        self.razer_usb = RazerUsbBackend()
+        self.engine = en.Engine(en.load_settings(), self.razer, self.dynlight, self.razer_usb)
         self.api = Api(self)
         self.quitting = False
         self.window = webview.create_window(
@@ -318,6 +325,7 @@ class App:
     def run(self):
         self.razer.start()
         self.dynlight.start()
+        self.razer_usb.start()
         self.engine.start()
         self.tray_ok = self.tray.start()
         webview.start(gui="edgechromium", private_mode=False,
@@ -329,6 +337,7 @@ class App:
         self.engine.join(timeout=3)
         self.razer.stop()
         self.dynlight.stop()
+        self.razer_usb.stop()
 
     def show(self):
         self.window.show()

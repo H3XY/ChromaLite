@@ -53,7 +53,7 @@ class LampDevice(dv.Device):
         uid = hashlib.sha1(device_id.encode("utf-8")).hexdigest()[:8]
         super().__init__(f"dl:{vid:04x}:{int(lamp_array.hardware_product_id):04x}:{uid}", kind, name,
                          BRANDS.get(vid, "Dynamic Lighting"), "Windows Dynamic Lighting", leds)
-        self.vendor_id = vid
+        self.vendor_id, self.product_id = vid, int(lamp_array.hardware_product_id)
         self.frame = (x, y, w, h)
         self._indices = array.array("i", range(len(leds)))
 
@@ -109,10 +109,11 @@ class DynamicLightingBackend:
     def stop(self):
         self._stop.set()
 
-    def devices(self, exclude_vendors=()):
+    def devices(self, exclude_vendors=(), exclude_products=()):
         if not self.enabled:
             return []
-        return [d for d in self._devices if d.vendor_id not in exclude_vendors]
+        return [d for d in self._devices if d.vendor_id not in exclude_vendors
+                and (d.vendor_id, d.product_id) not in exclude_products]
 
     async def _scan(self, known):
         from winrt.windows.devices.lights import LampArray
