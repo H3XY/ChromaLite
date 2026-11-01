@@ -35,8 +35,7 @@ button { font: inherit; color: inherit; }
 .sidebar { background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 22px 14px 16px; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 26px; }
 .brand svg { width: 30px; height: 30px; filter: drop-shadow(0 0 10px rgba(47, 140, 255, .55)); }
-.brand .word { font: 600 15px/1 var(--font-display); letter-spacing: .22em; }
-.brand .word b { color: var(--accent); font-weight: 700; }
+.brand .word { font: 700 15px/1 var(--font-display); letter-spacing: .22em; color: var(--accent); }
 .nav { display: flex; flex-direction: column; gap: 3px; }
 .nav button { all: unset; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; color: var(--muted); cursor: pointer; font-weight: 500; position: relative; transition: background .15s, color .15s; }
 .nav button svg { width: 18px; height: 18px; flex: none; }

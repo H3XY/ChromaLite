@@ -101,7 +101,7 @@ function signature() {
 function renderShell() {
   $("#root").innerHTML = `<div class="app">
     <aside class="sidebar">
-      <div class="brand">${LOGO("s")}<div class="word">PRISM<b>ATIC</b></div></div>
+      <div class="brand">${LOGO("s")}<div class="word">PRISMATIC</div></div>
       <nav class="nav" id="nav"></nav>
       <div class="side-foot" id="sources"></div>
     </aside>
