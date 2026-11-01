@@ -178,7 +178,10 @@ class Engine(threading.Thread):
     def current_devices(self):
         """Every device gets exactly one controller: Razer devices go through Synapse when it's
         there, otherwise directly over USB; Dynamic Lighting covers whatever's left."""
-        if self.razer.connected:
+        usb = self.razer_usb
+        # Synapse's SDK only reaches devices while the Synapse app runs; without it, prefer direct USB.
+        sdk_usable = self.razer.connected and (usb.synapse_app or not usb.enabled or not usb.supports_present())
+        if sdk_usable:
             self.razer_usb.wanted = False
             devs = self.razer.devices()
             skip_vendors, skip_products = {RAZER_VID}, set()

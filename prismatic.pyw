@@ -155,8 +155,7 @@ class Api:
                 "start_with_windows": startup_enabled(),
             },
             "sources": [
-                {"name": "Razer Chroma", "ok": self._app.razer.connected, "status": self._app.razer.status,
-                 "standby": self._app.razer_usb.active},  # not needed while direct USB has Razer devices covered
+                self._razer_source(),
                 {"name": "Razer direct USB", "ok": self._app.razer_usb.active,
                  "standby": self._app.razer.connected and s["usb_control"],
                  "status": self._app.razer_usb.status if s["usb_control"] else "Turned off"},
@@ -165,6 +164,15 @@ class Api:
             "errors": [eng.file_errors[n] for n in sorted(in_use) if n in eng.file_errors],
             "effects_dir": en.EFFECTS_DIR,
         }
+
+    def _razer_source(self):
+        razer, usb = self._app.razer, self._app.razer_usb
+        src = {"name": "Razer Chroma", "ok": razer.connected, "status": razer.status, "standby": usb.active}
+        if razer.connected and not usb.synapse_app:
+            src["ok"] = False
+            src["status"] = ("Not in use — Razer Synapse isn't running, so its Chroma SDK can't reach devices"
+                             + (" (direct USB is handling them)" if usb.active else ""))
+        return src
 
     def _dynlight_source(self, s, devs):
         name = "Windows Dynamic Lighting"

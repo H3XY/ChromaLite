@@ -263,8 +263,11 @@ class RazerUsbBackend:
 
     def __init__(self):
         self.enabled = True
-        self.wanted = False   # set by the engine: True when Synapse's Chroma SDK isn't available
+        self.wanted = False   # set by the engine: True when Synapse's Chroma SDK isn't usable
         self.active = False   # actually driving devices
+        # Synapse's app does the actual drawing for its Chroma SDK service: with the app closed,
+        # the service still accepts commands but nothing reaches the devices.
+        self.synapse_app = synapse_running()
         self.status = "Starting…"
         self._devices = {}    # pid -> RazerUsbDevice
         self._stop = threading.Event()
@@ -279,6 +282,10 @@ class RazerUsbBackend:
 
     def devices(self):
         return list(self._devices.values()) if self.active else []
+
+    def supports_present(self):
+        """True if a Razer device this backend can drive is plugged in."""
+        return bool(self._devices)
 
     def _scan(self):
         present = {}
@@ -301,6 +308,7 @@ class RazerUsbBackend:
     def _run(self):
         while not self._stop.is_set():
             try:
+                self.synapse_app = synapse_running()
                 self._scan()
                 n = len(self._devices)
                 if not self.enabled:
@@ -308,7 +316,7 @@ class RazerUsbBackend:
                 elif not self.wanted:
                     self.active = False
                     self.status = "Standing by — Razer Synapse is handling Razer devices"
-                elif synapse_running():
+                elif self.synapse_app:
                     self.active = False
                     self.status = "Razer Synapse is running but not accepting apps — close Synapse to control Razer devices directly"
                 elif n:
