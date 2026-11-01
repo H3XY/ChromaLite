@@ -28,7 +28,7 @@ from backend_razer import RazerBackend
 from backend_razer_usb import RazerUsbBackend
 
 APP_NAME = "Prismatic"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 REPO_URL = "https://github.com/H3XY/Prismatic"
 LINKS = {"repo": REPO_URL, "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases"}
 
