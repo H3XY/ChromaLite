@@ -44,6 +44,12 @@ ICON_PATH = os.path.join(BASE_DIR, "assets", "chromalite.ico")
 FILE_PREFIX = "File: "
 EFFECTS = ["Static", "Breathing", "Duo Pulse", "Spectrum Cycle", "Rainbow Wave", "Gradient Wave", "Starlight", "Off"]
 
+PROFILE_KEYS = ("effect", "color1", "color2", "brightness", "speed")
+# Which LEDs the preview strip shows for each device
+PREVIEW_LEDS = {"keyboard": [2 * 22 + c for c in range(22)],  # one row of keys
+                "mouse": [r * 7 + 3 for r in range(9)],        # center column, top to bottom
+                "mousepad": list(range(20))}
+
 PRESETS = ["#FF0000", "#FF6A00", "#FFD000", "#00FF40", "#00FFD5", "#0088FF", "#3A00FF", "#B000FF", "#FF00A0", "#FFFFFF"]
 
 DEFAULTS = {
@@ -53,6 +59,7 @@ DEFAULTS = {
     "brightness": 100,
     "speed": 5,
     "devices": {"keyboard": True, "mouse": True, "mousepad": True},
+    "overrides": {},  # device kind -> its own profile (PROFILE_KEYS); absent = follows the shared one
     "keypress_effects": True,  # reactive / ripple layers in effect files
     "close_to_tray": True,
     "tray_hint_shown": False,
@@ -98,9 +105,19 @@ def load_settings():
         s["devices"].update(saved.get("devices", {}))
     except (OSError, ValueError):
         pass
-    eff = s["effect"]
-    if eff not in EFFECTS and not (eff.startswith(FILE_PREFIX) and os.path.exists(effect_path(eff[len(FILE_PREFIX):]))):
+    def valid(eff):
+        return eff in EFFECTS or (eff.startswith(FILE_PREFIX) and os.path.exists(effect_path(eff[len(FILE_PREFIX):])))
+
+    if not valid(s["effect"]):
         s["effect"] = DEFAULTS["effect"]
+    overrides = {}
+    for kind, p in (s.get("overrides") or {}).items():
+        if isinstance(p, dict):
+            p = {k: p.get(k, s[k]) for k in PROFILE_KEYS}
+            if not valid(p["effect"]):
+                p["effect"] = s["effect"]
+            overrides[kind] = p
+    s["overrides"] = overrides
     return s
 
 
@@ -186,9 +203,10 @@ class Engine(threading.Thread):
         self.dirty = threading.Event()
         self.status = "Connecting…"
         self.devices = ce.make_devices()
-        self.preview = [(0, 0, 0)] * 22
+        self.previews = {k: [(0, 0, 0)] * len(idx) for k, idx in PREVIEW_LEDS.items()}
         self.stars = {k: [[0.0, (0, 0, 0)] for _ in d.leds] for k, d in self.devices.items()}
-        self.file_renderer, self.file_error, self.file_time = None, "", 0.0
+        self.renderers = {}    # (file name, speed) -> [Renderer or None, effect time]
+        self.file_errors = {}  # file name -> message
         self.keys, self.audio = None, None
         self.smoothed = {}
 
@@ -209,6 +227,28 @@ class Engine(threading.Thread):
         with self.lock:
             self.settings.update(changes)
         self.dirty.set()
+
+    def update_profile(self, target, changes):
+        """Change the shared profile ("all") or one device's own profile."""
+        with self.lock:
+            if target == "all":
+                self.settings.update(changes)
+            elif target in self.settings["overrides"]:
+                self.settings["overrides"][target].update(changes)
+        self.dirty.set()
+
+    def set_override(self, kind, enabled):
+        """Give a device its own profile (starting as a copy of the shared one), or drop it."""
+        with self.lock:
+            if enabled:
+                self.settings["overrides"][kind] = {k: self.settings[k] for k in PROFILE_KEYS}
+            else:
+                self.settings["overrides"].pop(kind, None)
+        self.dirty.set()
+
+    @staticmethod
+    def profile(s, kind):
+        return dict(s["overrides"].get(kind) or {k: s[k] for k in PROFILE_KEYS})
 
     def snapshot(self):
         with self.lock:
@@ -246,26 +286,57 @@ class Engine(threading.Thread):
         return [c1] * n  # Static
 
     # file effects -----------------------------------------------------
-    def file_frame(self, name, s, dt):
-        r = self.file_renderer
-        if r is None or r.name != name:
-            try:
-                r = self.file_renderer = ce.load(effect_path(name), self.devices)
-                self.file_error, self.file_time = "", 0.0
-                if r.unsupported:
-                    self.file_error = "Skipped unsupported layers: " + ", ".join(r.unsupported)
-            except Exception as e:
-                self.file_renderer, self.file_error = None, f"Couldn't load {name}: {e}"
-                return None
-        if r.needs_keys and self.keys is None:
-            self.keys = ce.KeyWatcher()
-        if r.needs_audio and self.audio is None:
-            self.audio = ce.AudioMeter()
-        k = s["speed"] / 5
-        self.file_time += dt * k
-        presses = self.keys.poll() if r.needs_keys and s["keypress_effects"] else ()
-        level = self.audio.level() if r.needs_audio else 0.0
-        return r.render(self.file_time, dt * k, presses, level)
+    def file_frames(self, s, wanted, dt):
+        """Render each effect file in use exactly once per frame.
+        wanted: set of (file name, speed). Returns {(name, speed): frame or None}."""
+        for key in list(self.renderers):
+            if key not in wanted:
+                del self.renderers[key]
+        for key in wanted:
+            if key not in self.renderers:
+                name = key[0]
+                try:
+                    r = ce.load(effect_path(name), self.devices)
+                    self.file_errors.pop(name, None)
+                    if r.unsupported:
+                        self.file_errors[name] = f"{name}: skipped unsupported layers ({', '.join(r.unsupported)})"
+                except Exception as e:
+                    r = None
+                    self.file_errors[name] = f"Couldn't load {name}: {e}"
+                self.renderers[key] = [r, 0.0]
+        live = [e[0] for e in self.renderers.values() if e[0]]
+        presses, level = (), 0.0
+        if s["keypress_effects"] and any(r.needs_keys for r in live):
+            if self.keys is None:
+                self.keys = ce.KeyWatcher()
+            presses = self.keys.poll()
+        if any(r.needs_audio for r in live):
+            if self.audio is None:
+                self.audio = ce.AudioMeter()
+            level = self.audio.level()
+        frames = {}
+        for (name, speed), entry in self.renderers.items():
+            r = entry[0]
+            if r is None:
+                frames[(name, speed)] = None
+                continue
+            k = speed / 5
+            entry[1] += dt * k
+            frames[(name, speed)] = r.render(entry[1], dt * k, presses, level)
+        return frames
+
+    def describe(self, s, profiles):
+        enabled = [k for k in self.devices if s["devices"].get(k, True)]
+        files = {profiles[k]["effect"][len(FILE_PREFIX):] for k in enabled if profiles[k]["effect"].startswith(FILE_PREFIX)}
+        errors = [self.file_errors[n] for n in sorted(files) if n in self.file_errors]
+        if errors:
+            return errors[0]
+        names = {k: profiles[k]["effect"].replace(FILE_PREFIX, "") for k in enabled}
+        if len(set(names.values())) > 1:
+            return " · ".join(f"{self.devices[k].label}: {n}" for k, n in names.items())
+        if files:
+            return f"Playing {next(iter(files))}"
+        return "Connected to Chroma SDK"
 
     def run(self):
         sess = ChromaSession()
@@ -285,36 +356,40 @@ class Engine(threading.Thread):
             now = time.time()
             dt, last = min(0.25, now - last), now
             s = self.snapshot()
-            bright = s["brightness"] / 100.0
-            eff = s["effect"]
-            is_file = eff.startswith(FILE_PREFIX)
-            animated = eff not in ("Static", "Off")
+            profiles = {kind: self.profile(s, kind) for kind in self.devices}
+            on = {kind: s["devices"].get(kind, True) and profiles[kind]["effect"] != "Off" for kind in self.devices}
+            animated = any(on[k] and profiles[k]["effect"] != "Static" for k in self.devices)
             try:
                 force = self.dirty.is_set() or now - last_static_push > 5
                 if animated or force:
                     self.dirty.clear()
-                    last_static_push = now
-                    frame = self.file_frame(eff[len(FILE_PREFIX):], s, dt) if is_file else None
-                    if is_file:
-                        self.status = self.file_error or f"Playing {eff[len(FILE_PREFIX):]}"
-                    elif self.status.startswith(("Playing", "Couldn't", "Skipped")):
-                        self.status = "Connected to Chroma SDK"
+                    if force:
+                        last_static_push = now
+                    wanted = {(p["effect"][len(FILE_PREFIX):], p["speed"]) for k, p in profiles.items()
+                              if on[k] and p["effect"].startswith(FILE_PREFIX)}
+                    frames = self.file_frames(s, wanted, dt) if wanted or self.renderers else {}
+                    self.status = self.describe(s, profiles)
                     for kind, dev in self.devices.items():
-                        if not s["devices"].get(kind, True) or eff == "Off" or (is_file and frame is None):
-                            sess.put(kind, {"effect": "CHROMA_NONE"})
-                            if kind == "keyboard":
-                                self.preview = [(0, 0, 0)] * 22
+                        p = profiles[kind]
+                        eff, bright = p["effect"], p["brightness"] / 100.0
+                        is_file = eff.startswith(FILE_PREFIX)
+                        frame = frames.get((eff[len(FILE_PREFIX):], p["speed"])) if is_file else None
+                        if not on[kind] or (is_file and frame is None):
+                            if force:
+                                sess.put(kind, {"effect": "CHROMA_NONE"})
+                                self.previews[kind] = [(0, 0, 0)] * len(PREVIEW_LEDS[kind])
                             continue
                         if eff == "Static":
-                            sess.put(kind, {"effect": "CHROMA_STATIC", "param": {"color": ce.to_bgr(hex_to_rgb(s["color1"]), bright)}})
-                            colors = [hex_to_rgb(s["color1"])] * len(dev.leds)
+                            if not force:  # another device is animating; this one needs no new frame
+                                continue
+                            sess.put(kind, {"effect": "CHROMA_STATIC", "param": {"color": ce.to_bgr(hex_to_rgb(p["color1"]), bright)}})
+                            colors = [hex_to_rgb(p["color1"])] * len(dev.leds)
                             self.smoothed[kind] = colors
                         else:
-                            colors = frame[kind] if is_file else self.builtin_colors(kind, s, now - t0, dt)
+                            colors = frame[kind] if is_file else self.builtin_colors(kind, p, now - t0, dt)
                             colors = self.smooth(kind, colors, dt)
                             sess.put(kind, dev.payload(colors, bright))
-                        if kind == "keyboard":
-                            self.preview = [tuple(v * bright for v in colors[2 * 22 + c]) for c in range(22)]
+                        self.previews[kind] = [tuple(v * bright for v in colors[i]) for i in PREVIEW_LEDS[kind]]
                 if now - sess.last_call > 4:
                     sess.heartbeat()
             except Exception:
@@ -355,11 +430,34 @@ class App:
 
         pad = {"padx": 16}
         tk.Label(root, text="CHROMALITE", bg=BG, fg=ACCENT, font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(14, 2), **pad)
-        self.status_lbl = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9), wraplength=360, justify="left")
+        # Two lines reserved so per-device status text doesn't make the window jump
+        self.status_lbl = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9), wraplength=360,
+                                   justify="left", anchor="nw", height=2)
         self.status_lbl.pack(anchor="w", **pad)
 
         self.preview = tk.Canvas(root, width=360, height=26, bg=BG, highlightthickness=0)
         self.preview.pack(pady=(10, 4), **pad)
+
+        # Which device the controls below edit
+        self.target = "all"
+        self.loading = False
+        self.controls_enabled = True
+        tabs = tk.Frame(root, bg=BG)
+        tabs.pack(anchor="w", pady=(6, 0), **pad)
+        self.tab_buttons = {}
+        for key, label in [("all", "All devices")] + [(k, d.label) for k, d in engine.devices.items()]:
+            b = tk.Button(tabs, text=label, command=lambda k=key: self.select_target(k), relief="flat", bd=0,
+                          padx=10, pady=4, font=("Segoe UI", 9), cursor="hand2",
+                          activebackground=PANEL, activeforeground=FG)
+            b.pack(side="left", padx=(0, 4))
+            self.tab_buttons[key] = b
+        self.own_row = tk.Frame(root, bg=BG)
+        self.own_row.pack(anchor="w", fill="x", pady=(6, 0), **pad)
+        self.own_var = tk.BooleanVar(value=False)
+        self.own_check = tk.Checkbutton(self.own_row, text="Give this device its own effect", variable=self.own_var,
+                                        command=self.toggle_own, bg=BG, fg=FG, selectcolor=PANEL,
+                                        activebackground=BG, activeforeground=FG, font=("Segoe UI", 9))
+        self.own_hint = tk.Label(self.own_row, text="", bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left")
 
         # Effect
         self.section("Effect")
@@ -396,10 +494,12 @@ class App:
         self.update_color_hint()
 
         # Sliders
+        self.sliders = {}
         self.section("Brightness")
-        self.bright = self.slider(0, 100, s["brightness"], "brightness")
+        self.slider(0, 100, s["brightness"], "brightness")
         self.section("Speed")
-        self.speed = self.slider(1, 10, s["speed"], "speed")
+        self.slider(1, 10, s["speed"], "speed")
+        self.select_target("all")
 
         # Devices
         self.section("Devices")
@@ -465,11 +565,79 @@ class App:
             iv = int(float(v))
             var.set(iv)
             out.config(text=str(iv))
-            self.push(**{key: iv})
+            if not self.loading:
+                self.push_profile(**{key: iv})
 
-        ttk.Scale(f, from_=lo, to=hi, value=val, command=changed, length=300).pack(side="left")
+        scale = ttk.Scale(f, from_=lo, to=hi, value=val, command=changed, length=300)
+        scale.pack(side="left")
         out.pack(side="left", padx=6)
-        return var
+        self.sliders[key] = scale
+
+    # per-device editing
+    def current_profile(self):
+        s = self.engine.snapshot()
+        return {k: s[k] for k in PROFILE_KEYS} if self.target == "all" else self.engine.profile(s, self.target)
+
+    def select_target(self, target):
+        self.target = target
+        overrides = self.engine.snapshot()["overrides"]
+        for key, b in self.tab_buttons.items():
+            label = "All devices" if key == "all" else self.engine.devices[key].label
+            if key in overrides:
+                label += " •"  # has its own effect
+            selected = key == target
+            b.config(text=label, bg=PANEL if selected else BG, fg=FG if selected else MUTED)
+        self.own_check.pack_forget()
+        self.own_hint.pack_forget()
+        if target == "all":
+            own = True
+            mine = [self.engine.devices[k].label for k in overrides]
+            self.own_hint.config(text="Applies to every device" + (" except " + ", ".join(mine) if mine else "")
+                                 + ". Pick a device above to give it its own effect.")
+        else:
+            own = target in overrides
+            self.own_var.set(own)
+            self.own_check.pack(anchor="w")
+            self.own_hint.config(text="" if own else "Following All devices. Tick the box to customize this device.")
+        if self.own_hint.cget("text"):
+            self.own_hint.pack(anchor="w")
+        self.load_controls()
+        self.set_controls_enabled(own)
+
+    def toggle_own(self):
+        self.engine.set_override(self.target, self.own_var.get())
+        save_settings(self.engine.snapshot())
+        self.select_target(self.target)
+
+    def load_controls(self):
+        """Show the selected device's settings without writing them back."""
+        p = self.current_profile()
+        self.loading = True
+        try:
+            self.effect.set(p["effect"])
+            for key in ("color1", "color2"):
+                btn = self.c1_btn if key == "color1" else self.c2_btn
+                btn.config(bg=p[key])
+                btn.text_lbl.config(text=f"{btn.caption}\n{p[key]}")
+            for key in ("brightness", "speed"):
+                self.sliders[key].set(p[key])
+        finally:
+            self.loading = False
+        self.update_color_hint()
+
+    def set_controls_enabled(self, enabled):
+        self.controls_enabled = enabled
+        self.effect_cb.config(state="readonly" if enabled else "disabled")
+        for scale in self.sliders.values():
+            scale.state(["!disabled"] if enabled else ["disabled"])
+        for btn in (self.c1_btn, self.c2_btn):
+            btn.config(cursor="hand2" if enabled else "arrow")
+
+    def push_profile(self, **changes):
+        if not self.controls_enabled:
+            return
+        self.engine.update_profile(self.target, changes)
+        save_settings(self.engine.snapshot())
 
     # actions
     def push(self, **changes):
@@ -480,7 +648,7 @@ class App:
         self.effect_cb.config(values=EFFECTS + [FILE_PREFIX + n for n in effect_files()])
 
     def choose_effect(self):
-        self.push(effect=self.effect.get())
+        self.push_profile(effect=self.effect.get())
         self.update_color_hint()
 
     def update_color_hint(self):
@@ -509,7 +677,7 @@ class App:
             except Exception:
                 bad.append(os.path.basename(p))
         self.refresh_effects()
-        if ok:
+        if ok and self.controls_enabled:  # play the first import on the device being edited
             self.effect.set(FILE_PREFIX + ok[0])
             self.choose_effect()
         msg = f"Imported {len(ok)} effect(s)."
@@ -524,16 +692,20 @@ class App:
         self.root.after(1500, self.refresh_effects)
 
     def pick(self, key):
-        cur = self.engine.snapshot()[key]
+        if not self.controls_enabled:
+            return
+        cur = self.current_profile()[key]
         res = colorchooser.askcolor(color=cur, title="Choose color", parent=self.root)
         if res and res[1]:
             self.set_color(key, res[1].upper())
 
     def set_color(self, key, value):
+        if not self.controls_enabled:
+            return
         btn = self.c1_btn if key == "color1" else self.c2_btn
         btn.config(bg=value)
         btn.text_lbl.config(text=f"{btn.caption}\n{value}")
-        self.push(**{key: value})
+        self.push_profile(**{key: value})
 
     def devices_changed(self):
         self.push(devices={d: v.get() for d, v in self.dev_vars.items()})
@@ -588,7 +760,7 @@ class App:
             self.status_lbl.config(text=self.engine.status)
         c = self.preview
         c.delete("all")
-        cells = self.engine.preview
+        cells = self.engine.previews["keyboard" if self.target == "all" else self.target]
         w = 360 / len(cells)
         for i, col in enumerate(cells):
             c.create_rectangle(i * w + 1, 2, (i + 1) * w - 1, 24, fill=rgb_to_hex(col), outline="")

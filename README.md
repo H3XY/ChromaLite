@@ -26,6 +26,8 @@ Chroma Studio effect files** on whatever Razer devices you own today.
   - device types the effect never targeted borrow its keyboard layout, so your
     whole setup lights up;
   - animations flow across a shared desk layout (keyboard → mouse → mousepad).
+- **Per-device effects:** give the keyboard, mouse and mousepad each their own
+  effect, colors, brightness and speed — or let them all share one.
 - **Keyboard underglow / side lighting** via the SDK's extended keyboard grid.
 - **Smooth output:** soft gradient edges and per-LED easing between frames.
 - **Runs in the system tray**, like Synapse: closing the window keeps your
@@ -56,6 +58,10 @@ Windows SmartScreen may warn about an unsigned app the first time; choose
 
 - Pick an effect from the **Effect** list. Brightness and speed apply to every
   effect; the two colors apply to the built-in effects.
+- To give one device a different effect, click its tab (**Keyboard**,
+  **Mouse** or **Mousepad**) and tick **Give this device its own effect**. The
+  controls then change only that device; tabs with their own effect show a •.
+  Untick it to make the device follow **All devices** again.
 - **Import…** adds `.ChromaEffects` files (Chroma Studio's export format). They
   appear in the list as `File: <name>`. **Folder** opens where they're stored.
 - **Closing** the window hides ChromaLite to the system tray and your lighting
