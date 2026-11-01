@@ -1,0 +1,2 @@
+# Only needed to build the .exe; the app itself uses the standard library only.
+pyinstaller==6.11.1

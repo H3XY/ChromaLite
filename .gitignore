@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# PyInstaller output
+build/
+dist/
+*.spec
+
+# Effect files are other people's designs; don't commit them
+*.ChromaEffects
