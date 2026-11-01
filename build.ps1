@@ -16,15 +16,20 @@ if (-not (Test-Path $py)) {
     Run py -3 -m venv $venv
 }
 Run $py -m ensurepip --upgrade
-Run $py -m pip install --quiet -r requirements-build.txt
+Run $py -m pip install --quiet -r requirements.txt -r requirements-build.txt
 
 Run $py tools\make_icon.py
 $icon = (Resolve-Path assets\chromalite.ico).Path
+$ui = (Resolve-Path ui).Path
 
 Run $py -m PyInstaller --noconfirm --clean --onefile --windowed `
     --name ChromaLite `
     --icon $icon `
     --add-data "$icon;assets" `
+    --add-data "$ui;ui" `
+    --collect-submodules winrt `
+    --hidden-import winrt.windows.foundation.collections `
+    --hidden-import winrt.windows.foundation.numerics `
     --workpath (Join-Path $venv "pyi-build") --specpath (Join-Path $venv "pyi-build") `
     chromalite.pyw
 

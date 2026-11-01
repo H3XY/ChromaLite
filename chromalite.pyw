@@ -1,798 +1,366 @@
 """
-ChromaLite — a lightweight lighting controller for Razer Chroma devices.
+ChromaLite — a lightweight lighting app for gaming keyboards, mice and mousepads.
 
-Talks directly to the Razer Chroma SDK REST server (localhost:54235) that
-ships with Synapse, so you don't need the Synapse UI at all. Also plays
-Synapse 3 Chroma Studio effect files (.ChromaEffects), remapped onto
-whatever devices you have. Standard library only. Run with:
-    pyw chromalite.pyw          (add --minimized to start minimized)
+Razer devices are controlled through the Razer Chroma SDK that ships with
+Synapse; devices from other brands through Windows Dynamic Lighting. Also
+plays Synapse 3 Chroma Studio effect files (.ChromaEffects) on any of them.
+
+The window is an HTML interface (ui/) shown with pywebview (WebView2); this
+file wires it to the engine and keeps the app alive in the system tray.
+
+Run from source:  pyw chromalite.pyw   (add --minimized to start in the tray)
 """
-import colorsys
 import ctypes
-import http.client
-import json
-import math
 import os
-import random
-import queue
 import shutil
 import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import colorchooser, filedialog, ttk
-from urllib.parse import urlparse
+import webbrowser
+
+import webview
 
 import chroma_effects as ce
+import engine as en
 import tray
+from backend_dynlight import DynamicLightingBackend
+from backend_razer import RazerBackend
 
 APP_NAME = "ChromaLite"
-SDK_HOST, SDK_PORT = "localhost", 54235
-FPS = 30
-SMOOTHING_S = 0.06  # time constant of the per-LED ease between frames
-APPDATA = os.environ.get("APPDATA", os.path.expanduser("~"))
-CONFIG_DIR = os.path.join(APPDATA, "ChromaLite")
-LEGACY_CONFIG_DIR = os.path.join(APPDATA, "RazerLighting")  # pre-rename location
-CONFIG_PATH = os.path.join(CONFIG_DIR, "settings.json")
-EFFECTS_DIR = os.path.join(CONFIG_DIR, "effects")
-EFFECT_EXT = ".ChromaEffects"
-STARTUP_VBS = os.path.join(APPDATA, r"Microsoft\Windows\Start Menu\Programs\Startup\ChromaLite.vbs")
+APP_VERSION = "2.0.0"
+REPO_URL = "https://github.com/H3XY/ChromaLite"
+LINKS = {"repo": REPO_URL, "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases"}
+
 FROZEN = getattr(sys, "frozen", False)  # running as the PyInstaller .exe
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "chromalite.ico")
+UI_INDEX = os.path.join(BASE_DIR, "ui", "index.html")
+STARTUP_VBS = os.path.join(en.APPDATA, r"Microsoft\Windows\Start Menu\Programs\Startup\ChromaLite.vbs")
 
-FILE_PREFIX = "File: "
-EFFECTS = ["Static", "Breathing", "Duo Pulse", "Spectrum Cycle", "Rainbow Wave", "Gradient Wave", "Starlight", "Off"]
+WINDOW_BG = "#07090D"
 
-PROFILE_KEYS = ("effect", "color1", "color2", "brightness", "speed")
-# Which LEDs the preview strip shows for each device
-PREVIEW_LEDS = {"keyboard": [2 * 22 + c for c in range(22)],  # one row of keys
-                "mouse": [r * 7 + 3 for r in range(9)],        # center column, top to bottom
-                "mousepad": list(range(20))}
-
-PRESETS = ["#FF0000", "#FF6A00", "#FFD000", "#00FF40", "#00FFD5", "#0088FF", "#3A00FF", "#B000FF", "#FF00A0", "#FFFFFF"]
-
-DEFAULTS = {
-    "effect": "Rainbow Wave",
-    "color1": "#00FF40",
-    "color2": "#3A00FF",
-    "brightness": 100,
-    "speed": 5,
-    "devices": {"keyboard": True, "mouse": True, "mousepad": True},
-    "overrides": {},  # device kind -> its own profile (PROFILE_KEYS); absent = follows the shared one
-    "keypress_effects": True,  # reactive / ripple layers in effect files
-    "close_to_tray": True,
-    "tray_hint_shown": False,
+# What the interface needs to know about each built-in effect
+BUILTIN_META = {
+    "Static": {"colors": 1, "speed": False, "desc": "One solid color"},
+    "Breathing": {"colors": 1, "speed": True, "desc": "Fades in and out"},
+    "Duo Pulse": {"colors": 2, "speed": True, "desc": "Pulses between two colors"},
+    "Spectrum Cycle": {"colors": 0, "speed": True, "desc": "Cycles through every color"},
+    "Rainbow Wave": {"colors": 0, "speed": True, "desc": "A rainbow sweeping across"},
+    "Gradient Wave": {"colors": 2, "speed": True, "desc": "Two colors sweeping across"},
+    "Starlight": {"colors": 2, "speed": True, "desc": "Twinkling stars"},
+    "Off": {"colors": 0, "speed": False, "desc": "Lights off"},
 }
 
 
 # ---------------------------------------------------------------- helpers
-def hex_to_rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+def rgb_hex(c):
+    return "%02x%02x%02x" % (max(0, min(255, int(c[0]))), max(0, min(255, int(c[1]))), max(0, min(255, int(c[2]))))
 
 
-def rgb_to_hex(c):
-    return "#%02X%02X%02X" % tuple(max(0, min(255, int(v))) for v in c)
+_THUMB_DEVICES = None
 
 
-def mix(a, b, k):
-    return tuple(a[i] + (b[i] - a[i]) * k for i in range(3))
+def effect_palette(fx, n=7):
+    """A few representative colors for an effect file's thumbnail: one rendered
+    frame sampled across a virtual keyboard, or its declared colors if that's dark."""
+    global _THUMB_DEVICES
+    if _THUMB_DEVICES is None:
+        from backend_razer import RazerDevice
+        _THUMB_DEVICES = {"thumb": RazerDevice(None, "keyboard", "")}
+    leds = _THUMB_DEVICES["thumb"].leds
+    renderer = ce.Renderer(fx, _THUMB_DEVICES)
+    frame = None
+    for i in range(12):  # let starlight and similar effects get going
+        frame = renderer.render(1.0 + i * 0.1, 0.1)["thumb"]
+    row = sorted((i for i, l in enumerate(leds) if l.key and l.key[0] in (2, 3)), key=lambda i: (leds[i].u, leds[i].v))
+    picks = [frame[row[int(k * (len(row) - 1) / (n - 1))]] for k in range(n)] if row else []
+    lit = [c for c in picks if max(c) > 40]
+    if len(lit) < 3:
+        lit = [c[:3] for layer in fx.layers for reg in layer.regions for c in reg.colors if c[3] > 0 and max(c[:3]) > 40][:n]
+    return ["#" + rgb_hex(c) for c in lit]
 
 
-def hue(h):
-    return tuple(v * 255 for v in colorsys.hsv_to_rgb(h % 1.0, 1.0, 1.0))
+def startup_enabled():
+    return os.path.exists(STARTUP_VBS)
 
 
-def effect_files():
+def set_startup(enabled):
+    if enabled:
+        if FROZEN:
+            args = f'""{sys.executable}""'
+        else:
+            exe = sys.executable
+            if exe.lower().endswith("python.exe"):
+                exe = exe[:-10] + "pythonw.exe"
+            args = f'""{exe}"" ""{os.path.abspath(__file__)}""'
+        with open(STARTUP_VBS, "w", encoding="utf-8") as f:
+            f.write(f'CreateObject("WScript.Shell").Run "{args} --minimized", 0, False\n')
+    elif os.path.exists(STARTUP_VBS):
+        os.remove(STARTUP_VBS)
+
+
+def style_title_bar(window):
+    """Dark Windows 11 title bar in the app's own background color."""
     try:
-        names = [f[:-len(EFFECT_EXT)] for f in os.listdir(EFFECTS_DIR) if f.lower().endswith(EFFECT_EXT.lower())]
-    except OSError:
-        return []
-    return sorted(names, key=str.lower)
-
-
-def effect_path(name):
-    return os.path.join(EFFECTS_DIR, name + EFFECT_EXT)
-
-
-def load_settings():
-    s = json.loads(json.dumps(DEFAULTS))
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        s.update({k: v for k, v in saved.items() if k in s and k != "devices"})
-        s["devices"].update(saved.get("devices", {}))
-    except (OSError, ValueError):
-        pass
-    def valid(eff):
-        return eff in EFFECTS or (eff.startswith(FILE_PREFIX) and os.path.exists(effect_path(eff[len(FILE_PREFIX):])))
-
-    if not valid(s["effect"]):
-        s["effect"] = DEFAULTS["effect"]
-    overrides = {}
-    for kind, p in (s.get("overrides") or {}).items():
-        if isinstance(p, dict):
-            p = {k: p.get(k, s[k]) for k in PROFILE_KEYS}
-            if not valid(p["effect"]):
-                p["effect"] = s["effect"]
-            overrides[kind] = p
-    s["overrides"] = overrides
-    return s
-
-
-def save_settings(s):
-    try:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(s, f, indent=2)
-    except OSError:
+        hwnd = int(window.native.Handle.ToInt64())
+        dwm = ctypes.windll.dwmapi
+        for attr, value in ((20, 1),            # DWMWA_USE_IMMERSIVE_DARK_MODE
+                            (35, 0x000D0907),   # DWMWA_CAPTION_COLOR  (0x00BBGGRR of WINDOW_BG)
+                            (34, 0x000D0907),   # DWMWA_BORDER_COLOR
+                            (36, 0x00F0EAE6)):  # DWMWA_TEXT_COLOR
+            v = ctypes.c_int(value)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+    except Exception:
         pass
 
 
-# ---------------------------------------------------------------- Chroma SDK
-class ChromaSession:
-    """One registered app session with the Chroma SDK REST server."""
+# ---------------------------------------------------------------- JS bridge
+class Api:
+    """Methods the interface calls as pywebview.api.<name>(...). Attributes
+    starting with "_" are not exposed to the page."""
 
-    def __init__(self):
-        self.base = None  # (host, port, path)
-        self.conn = None
-        self.last_call = 0.0
+    def __init__(self, app):
+        self._app = app
+        self._layout_sig = None
+        self._layout = {}
+        self._library_cache = {}
 
-    def _request(self, host, port, method, path, body=None):
-        if self.conn is None or (self.conn.host, self.conn.port) != (host, port):
-            self.close_conn()
-            self.conn = http.client.HTTPConnection(host, port, timeout=3)
-        data = json.dumps(body) if body is not None else None
-        try:
-            self.conn.request(method, path, body=data, headers={"Content-Type": "application/json"})
-            resp = self.conn.getresponse()
-            raw = resp.read()
-        except Exception:
-            self.close_conn()
-            raise
-        self.last_call = time.time()
-        return json.loads(raw) if raw else {}
+    # state ---------------------------------------------------------------
+    def get_state(self):
+        eng = self._app.engine
+        s = eng.snapshot()
+        devs = list(eng.device_map.values())
+        in_use = {p["effect"][len(en.FILE_PREFIX):] for p in [en.Engine.profile(s, d.id) for d in devs] + [s]
+                  if p["effect"].startswith(en.FILE_PREFIX)}
+        return {
+            "version": APP_VERSION,
+            "devices": [{
+                "id": d.id, "name": d.name, "kind": d.kind, "brand": d.brand, "source": d.source,
+                "enabled": s["device_enabled"].get(d.id, True), "own": d.id in s["overrides"],
+                "available": d.available, "leds": len(d.leds),
+            } for d in devs],
+            "profiles": dict({"all": {k: s[k] for k in en.PROFILE_KEYS}},
+                             **{d.id: en.Engine.profile(s, d.id) for d in devs}),
+            "builtin": [dict(name=n, **m) for n, m in BUILTIN_META.items()],
+            "library": en.effect_files(),
+            "file_prefix": en.FILE_PREFIX,
+            "settings": {
+                "keypress_effects": s["keypress_effects"],
+                "close_to_tray": s["close_to_tray"],
+                "dynamic_lighting": s["dynamic_lighting"],
+                "start_with_windows": startup_enabled(),
+            },
+            "sources": [
+                {"name": "Razer Chroma", "ok": self._app.razer.connected, "status": self._app.razer.status},
+                self._dynlight_source(s, devs),
+            ],
+            "errors": [eng.file_errors[n] for n in sorted(in_use) if n in eng.file_errors],
+            "effects_dir": en.EFFECTS_DIR,
+        }
 
-    def close_conn(self):
-        if self.conn is not None:
-            try:
-                self.conn.close()
-            except Exception:
-                pass
-            self.conn = None
+    def _dynlight_source(self, s, devs):
+        name = "Windows Dynamic Lighting"
+        if not s["dynamic_lighting"]:
+            return {"name": name, "ok": False, "status": "Turned off"}
+        found = self._app.dynlight._devices
+        used = [d for d in devs if d.source == name]
+        if found and not used:  # only Razer devices, which go through Synapse instead
+            return {"name": name, "ok": True,
+                    "status": f"{len(found)} device{'s' if len(found) != 1 else ''} found, all controlled through Razer Chroma instead"}
+        if used:
+            return {"name": name, "ok": True, "status": f"Controlling {len(used)} device{'s' if len(used) != 1 else ''}"}
+        return {"name": name, "ok": False, "status": self._app.dynlight.status}
 
-    def connect(self, devices):
-        res = self._request(SDK_HOST, SDK_PORT, "POST", "/razer/chromasdk", {
-            "title": APP_NAME,
-            "description": "Lightweight lighting controller",
-            "author": {"name": "local", "contact": "local"},
-            "device_supported": list(devices),
-            "category": "application",
-        })
-        u = urlparse(res["uri"])
-        self.base = (u.hostname, u.port, u.path.rstrip("/"))
-        time.sleep(1.0)  # the SDK needs a moment before it accepts effects
+    def get_layout(self):
+        devs = self._app.engine.device_map
+        sig = tuple(sorted(devs))
+        if sig != self._layout_sig:
+            layout = {}
+            for d in devs.values():
+                lay = d.preview_layout()
+                layout[d.id] = {
+                    "name": d.name, "kind": d.kind, "shape": lay["shape"], "frame": list(lay["frame"]),
+                    "dots": [[i, style, round(d.leds[i].gx, 3), round(d.leds[i].gy, 3)] for i, style in lay["dots"]],
+                }
+            self._layout, self._layout_sig = layout, sig
+        return self._layout
 
-    def put(self, device, payload):
-        host, port, path = self.base
-        return self._request(host, port, "PUT", f"{path}/{device}", payload)
-
-    def heartbeat(self):
-        host, port, path = self.base
-        self._request(host, port, "PUT", f"{path}/heartbeat")
-
-    def disconnect(self):
-        if self.base:
-            host, port, path = self.base
-            try:
-                self._request(host, port, "DELETE", path)
-            except Exception:
-                pass
-        self.base = None
-        self.close_conn()
-
-
-# ---------------------------------------------------------------- renderer
-class Engine(threading.Thread):
-    def __init__(self, settings):
-        super().__init__(daemon=True)
-        self.settings = settings
-        self.lock = threading.Lock()
-        self.stop_evt = threading.Event()
-        self.dirty = threading.Event()
-        self.status = "Connecting…"
-        self.devices = ce.make_devices()
-        self.previews = {k: [(0, 0, 0)] * len(idx) for k, idx in PREVIEW_LEDS.items()}
-        self.stars = {k: [[0.0, (0, 0, 0)] for _ in d.leds] for k, d in self.devices.items()}
-        self.renderers = {}    # (file name, speed) -> [Renderer or None, effect time]
-        self.file_errors = {}  # file name -> message
-        self.keys, self.audio = None, None
-        self.smoothed = {}
-
-    def smooth(self, kind, colors, dt):
-        """Ease each LED toward its new color so single-frame jumps can't flash.
-        Also gives a quick crossfade when switching effects."""
-        prev = self.smoothed.get(kind)
-        if prev is None or len(prev) != len(colors):
-            self.smoothed[kind] = [tuple(c) for c in colors]
-            return colors
-        k = 1 - math.exp(-dt / SMOOTHING_S)
-        out = [(p[0] + (c[0] - p[0]) * k, p[1] + (c[1] - p[1]) * k, p[2] + (c[2] - p[2]) * k)
-               for p, c in zip(prev, colors)]
-        self.smoothed[kind] = out
+    def get_frame(self):
+        """Current colors of every drawn LED: {device id: "rrggbb" * number of dots}."""
+        layout = self.get_layout()
+        colors = self._app.engine.colors
+        out = {}
+        for dev_id, lay in layout.items():
+            cs = colors.get(dev_id)
+            if cs:
+                out[dev_id] = "".join(rgb_hex(cs[i[0]]) if i[0] < len(cs) else "000000" for i in lay["dots"])
         return out
 
-    def update(self, **changes):
-        with self.lock:
-            self.settings.update(changes)
-        self.dirty.set()
-
-    def update_profile(self, target, changes):
-        """Change the shared profile ("all") or one device's own profile."""
-        with self.lock:
-            if target == "all":
-                self.settings.update(changes)
-            elif target in self.settings["overrides"]:
-                self.settings["overrides"][target].update(changes)
-        self.dirty.set()
-
-    def set_override(self, kind, enabled):
-        """Give a device its own profile (starting as a copy of the shared one), or drop it."""
-        with self.lock:
-            if enabled:
-                self.settings["overrides"][kind] = {k: self.settings[k] for k in PROFILE_KEYS}
-            else:
-                self.settings["overrides"].pop(kind, None)
-        self.dirty.set()
-
-    @staticmethod
-    def profile(s, kind):
-        return dict(s["overrides"].get(kind) or {k: s[k] for k in PROFILE_KEYS})
-
-    def snapshot(self):
-        with self.lock:
-            return json.loads(json.dumps(self.settings))
-
-    # built-in effects -------------------------------------------------
-    def builtin_colors(self, kind, s, t, dt):
-        eff, speed = s["effect"], s["speed"]
-        c1, c2 = hex_to_rgb(s["color1"]), hex_to_rgb(s["color2"])
-        leds = self.devices[kind].leds
-        n = len(leds)
-        pos = [l.v if kind == "mouse" else l.u for l in leds]  # mouse LEDs run top to bottom
-        if eff == "Breathing":
-            k = (1 - math.cos(2 * math.pi * t * 0.07 * speed)) / 2
-            return [mix((0, 0, 0), c1, k)] * n
-        if eff == "Duo Pulse":
-            k = (1 - math.cos(2 * math.pi * t * 0.07 * speed)) / 2
-            return [mix(c1, c2, k)] * n
-        if eff == "Spectrum Cycle":
-            return [hue(t * 0.03 * speed)] * n
-        if eff == "Rainbow Wave":
-            return [hue(p * 0.8 - t * 0.06 * speed) for p in pos]
-        if eff == "Gradient Wave":
-            return [mix(c1, c2, (math.sin(2 * math.pi * (p - t * 0.06 * speed)) + 1) / 2) for p in pos]
-        if eff == "Starlight":
-            chance = 0.004 * speed * (dt * FPS)
-            base = mix((0, 0, 0), c2, 0.15)
-            out = []
-            for st in self.stars[kind]:
-                if st[0] <= 0 and random.random() < chance:
-                    st[0], st[1] = 1.0, (c1 if random.random() < 0.5 else c2)
-                st[0] = max(0.0, st[0] - dt * (0.25 + 0.08 * speed))
-                out.append(mix(base, st[1], math.sin(math.pi * st[0])))  # fade in, then out
-            return out
-        return [c1] * n  # Static
-
-    # file effects -----------------------------------------------------
-    def file_frames(self, s, wanted, dt):
-        """Render each effect file in use exactly once per frame.
-        wanted: set of (file name, speed). Returns {(name, speed): frame or None}."""
-        for key in list(self.renderers):
-            if key not in wanted:
-                del self.renderers[key]
-        for key in wanted:
-            if key not in self.renderers:
-                name = key[0]
-                try:
-                    r = ce.load(effect_path(name), self.devices)
-                    self.file_errors.pop(name, None)
-                    if r.unsupported:
-                        self.file_errors[name] = f"{name}: skipped unsupported layers ({', '.join(r.unsupported)})"
-                except Exception as e:
-                    r = None
-                    self.file_errors[name] = f"Couldn't load {name}: {e}"
-                self.renderers[key] = [r, 0.0]
-        live = [e[0] for e in self.renderers.values() if e[0]]
-        presses, level = (), 0.0
-        if s["keypress_effects"] and any(r.needs_keys for r in live):
-            if self.keys is None:
-                self.keys = ce.KeyWatcher()
-            presses = self.keys.poll()
-        if any(r.needs_audio for r in live):
-            if self.audio is None:
-                self.audio = ce.AudioMeter()
-            level = self.audio.level()
-        frames = {}
-        for (name, speed), entry in self.renderers.items():
-            r = entry[0]
-            if r is None:
-                frames[(name, speed)] = None
+    def get_library(self):
+        items = []
+        for name in en.effect_files():
+            path = en.effect_path(name)
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
                 continue
-            k = speed / 5
-            entry[1] += dt * k
-            frames[(name, speed)] = r.render(entry[1], dt * k, presses, level)
-        return frames
+            meta = self._library_cache.get(name)
+            if not meta or meta["mtime"] != mtime:
+                try:
+                    fx = ce.ChromaEffect(path)
+                    kinds = []
+                    for layer in fx.layers:
+                        if layer.visible and layer.effect in ce.SUPPORTED and layer.effect not in kinds:
+                            kinds.append(layer.effect)
+                    meta = {"mtime": mtime, "layers": kinds, "ok": True, "palette": effect_palette(fx),
+                            "keys": any(k in ("reactive", "ripple") for k in kinds), "audio": "audiometer" in kinds}
+                except Exception:
+                    meta = {"mtime": mtime, "layers": [], "ok": False, "keys": False, "audio": False, "palette": []}
+                self._library_cache[name] = meta
+            items.append({"name": name, **{k: v for k, v in meta.items() if k != "mtime"}})
+        return items
 
-    def describe(self, s, profiles):
-        enabled = [k for k in self.devices if s["devices"].get(k, True)]
-        files = {profiles[k]["effect"][len(FILE_PREFIX):] for k in enabled if profiles[k]["effect"].startswith(FILE_PREFIX)}
-        errors = [self.file_errors[n] for n in sorted(files) if n in self.file_errors]
-        if errors:
-            return errors[0]
-        names = {k: profiles[k]["effect"].replace(FILE_PREFIX, "") for k in enabled}
-        if len(set(names.values())) > 1:
-            return " · ".join(f"{self.devices[k].label}: {n}" for k, n in names.items())
-        if files:
-            return f"Playing {next(iter(files))}"
-        return "Connected to Chroma SDK"
+    # changes ---------------------------------------------------------------
+    def _saved(self):
+        en.save_settings(self._app.engine.snapshot())
+        return self.get_state()
+
+    def set_profile(self, target, changes):
+        if "effect" in changes and not en.valid_effect(changes["effect"]):
+            return self.get_state()
+        self._app.engine.update_profile(target, changes)
+        return self._saved()
+
+    def set_own(self, dev_id, own):
+        self._app.engine.set_override(dev_id, bool(own))
+        return self._saved()
+
+    def set_enabled(self, dev_id, on):
+        self._app.engine.set_enabled(dev_id, bool(on))
+        return self._saved()
+
+    def set_setting(self, key, value):
+        if key == "start_with_windows":
+            try:
+                set_startup(bool(value))
+            except OSError:
+                pass
+            return self.get_state()
+        if key in ("keypress_effects", "close_to_tray", "dynamic_lighting"):
+            self._app.engine.update(**{key: bool(value)})
+        return self._saved()
+
+    def import_effects(self):
+        paths = self._app.window.create_file_dialog(
+            webview.FileDialog.OPEN, allow_multiple=True,
+            file_types=("Chroma Studio effects (*.ChromaEffects)", "All files (*.*)"))
+        imported, failed = [], []
+        if paths:
+            os.makedirs(en.EFFECTS_DIR, exist_ok=True)
+            for p in paths:
+                try:
+                    ce.ChromaEffect(p)  # validate before copying
+                    name = os.path.basename(p)
+                    if not name.lower().endswith(en.EFFECT_EXT.lower()):
+                        name += en.EFFECT_EXT
+                    shutil.copyfile(p, os.path.join(en.EFFECTS_DIR, name))
+                    imported.append(name[:-len(en.EFFECT_EXT)])
+                except Exception:
+                    failed.append(os.path.basename(p))
+        return {"imported": imported, "failed": failed, "state": self.get_state()}
+
+    def delete_effect(self, name):
+        path = en.effect_path(name)  # effect_path() strips any directory parts
+        eff = en.FILE_PREFIX + os.path.basename(name)
+        eng = self._app.engine
+        s = eng.snapshot()
+        if s["effect"] == eff:
+            eng.update_profile("all", {"effect": en.DEFAULTS["effect"]})
+        for dev_id, p in s["overrides"].items():
+            if p["effect"] == eff:
+                eng.update_profile(dev_id, {"effect": en.DEFAULTS["effect"]})
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return self._saved()
+
+    def open_effects_folder(self):
+        os.makedirs(en.EFFECTS_DIR, exist_ok=True)
+        os.startfile(en.EFFECTS_DIR)
+
+    def open_link(self, which):
+        if which in LINKS:
+            webbrowser.open(LINKS[which])
+
+    def hide_tray_hint(self):
+        self._app.engine.update(tray_hint_shown=True)
+        en.save_settings(self._app.engine.snapshot())
+
+
+# ---------------------------------------------------------------- app
+class App:
+    def __init__(self, minimized):
+        self.razer = RazerBackend(APP_NAME)
+        self.dynlight = DynamicLightingBackend()
+        self.engine = en.Engine(en.load_settings(), self.razer, self.dynlight)
+        self.api = Api(self)
+        self.quitting = False
+        self.window = webview.create_window(
+            APP_NAME, url=UI_INDEX, js_api=self.api, width=1200, height=780, min_size=(1000, 660),
+            background_color=WINDOW_BG, hidden=minimized, text_select=False)
+        self.window.events.closing += self.on_closing
+        self.window.events.shown += lambda: style_title_bar(self.window)
+        self.tray = tray.Tray(ICON_PATH, APP_NAME, self.show, self.quit)
 
     def run(self):
-        sess = ChromaSession()
-        t0 = last = time.time()
-        last_static_push = 0.0
-        while not self.stop_evt.is_set():
-            if sess.base is None:
-                try:
-                    sess.connect(self.devices)
-                    self.status = "Connected to Chroma SDK"
-                    last_static_push = 0.0
-                except Exception:
-                    self.status = "Chroma SDK not reachable — retrying…"
-                    sess.base = None
-                    self.stop_evt.wait(3)
-                    continue
-            now = time.time()
-            dt, last = min(0.25, now - last), now
-            s = self.snapshot()
-            profiles = {kind: self.profile(s, kind) for kind in self.devices}
-            on = {kind: s["devices"].get(kind, True) and profiles[kind]["effect"] != "Off" for kind in self.devices}
-            animated = any(on[k] and profiles[k]["effect"] != "Static" for k in self.devices)
-            try:
-                force = self.dirty.is_set() or now - last_static_push > 5
-                if animated or force:
-                    self.dirty.clear()
-                    if force:
-                        last_static_push = now
-                    wanted = {(p["effect"][len(FILE_PREFIX):], p["speed"]) for k, p in profiles.items()
-                              if on[k] and p["effect"].startswith(FILE_PREFIX)}
-                    frames = self.file_frames(s, wanted, dt) if wanted or self.renderers else {}
-                    self.status = self.describe(s, profiles)
-                    for kind, dev in self.devices.items():
-                        p = profiles[kind]
-                        eff, bright = p["effect"], p["brightness"] / 100.0
-                        is_file = eff.startswith(FILE_PREFIX)
-                        frame = frames.get((eff[len(FILE_PREFIX):], p["speed"])) if is_file else None
-                        if not on[kind] or (is_file and frame is None):
-                            if force:
-                                sess.put(kind, {"effect": "CHROMA_NONE"})
-                                self.previews[kind] = [(0, 0, 0)] * len(PREVIEW_LEDS[kind])
-                            continue
-                        if eff == "Static":
-                            if not force:  # another device is animating; this one needs no new frame
-                                continue
-                            sess.put(kind, {"effect": "CHROMA_STATIC", "param": {"color": ce.to_bgr(hex_to_rgb(p["color1"]), bright)}})
-                            colors = [hex_to_rgb(p["color1"])] * len(dev.leds)
-                            self.smoothed[kind] = colors
-                        else:
-                            colors = frame[kind] if is_file else self.builtin_colors(kind, p, now - t0, dt)
-                            colors = self.smooth(kind, colors, dt)
-                            sess.put(kind, dev.payload(colors, bright))
-                        self.previews[kind] = [tuple(v * bright for v in colors[i]) for i in PREVIEW_LEDS[kind]]
-                if now - sess.last_call > 4:
-                    sess.heartbeat()
-            except Exception:
-                self.status = "Lost connection — reconnecting…"
-                sess.base = None
-                sess.close_conn()
-                continue
-            wait = (1.0 / FPS) if animated else 0.5
-            self.dirty.wait(max(0.0, wait - (time.time() - now)))
-        sess.disconnect()
-
-
-# ---------------------------------------------------------------- UI
-BG, PANEL, FG, MUTED, ACCENT = "#121214", "#1C1C20", "#ECECEC", "#8A8A93", "#44D62C"
-
-
-class App:
-    def __init__(self, root, engine):
-        self.root, self.engine = root, engine
-        s = engine.snapshot()
-        root.title(APP_NAME)
-        try:
-            root.iconbitmap(default=ICON_PATH)
-        except tk.TclError:
-            pass
-        root.configure(bg=BG)
-        root.resizable(False, False)
-        root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-        style = ttk.Style(root)
-        style.theme_use("clam")
-        style.configure("TCombobox", fieldbackground=PANEL, background=PANEL, foreground=FG, arrowcolor=FG)
-        style.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", FG)])
-        style.configure("Horizontal.TScale", background=BG, troughcolor=PANEL)
-        root.option_add("*TCombobox*Listbox.background", PANEL)
-        root.option_add("*TCombobox*Listbox.foreground", FG)
-        root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
-
-        pad = {"padx": 16}
-        tk.Label(root, text="CHROMALITE", bg=BG, fg=ACCENT, font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(14, 2), **pad)
-        # Two lines reserved so per-device status text doesn't make the window jump
-        self.status_lbl = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9), wraplength=360,
-                                   justify="left", anchor="nw", height=2)
-        self.status_lbl.pack(anchor="w", **pad)
-
-        self.preview = tk.Canvas(root, width=360, height=26, bg=BG, highlightthickness=0)
-        self.preview.pack(pady=(10, 4), **pad)
-
-        # Which device the controls below edit
-        self.target = "all"
-        self.loading = False
-        self.controls_enabled = True
-        tabs = tk.Frame(root, bg=BG)
-        tabs.pack(anchor="w", pady=(6, 0), **pad)
-        self.tab_buttons = {}
-        for key, label in [("all", "All devices")] + [(k, d.label) for k, d in engine.devices.items()]:
-            b = tk.Button(tabs, text=label, command=lambda k=key: self.select_target(k), relief="flat", bd=0,
-                          padx=10, pady=4, font=("Segoe UI", 9), cursor="hand2",
-                          activebackground=PANEL, activeforeground=FG)
-            b.pack(side="left", padx=(0, 4))
-            self.tab_buttons[key] = b
-        self.own_row = tk.Frame(root, bg=BG)
-        self.own_row.pack(anchor="w", fill="x", pady=(6, 0), **pad)
-        self.own_var = tk.BooleanVar(value=False)
-        self.own_check = tk.Checkbutton(self.own_row, text="Give this device its own effect", variable=self.own_var,
-                                        command=self.toggle_own, bg=BG, fg=FG, selectcolor=PANEL,
-                                        activebackground=BG, activeforeground=FG, font=("Segoe UI", 9))
-        self.own_hint = tk.Label(self.own_row, text="", bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left")
-
-        # Effect
-        self.section("Effect")
-        erow = tk.Frame(root, bg=BG)
-        erow.pack(anchor="w", **pad)
-        self.effect = tk.StringVar(value=s["effect"])
-        self.effect_cb = ttk.Combobox(erow, textvariable=self.effect, state="readonly", width=30, font=("Segoe UI", 10), height=20)
-        self.effect_cb.pack(side="left")
-        self.effect_cb.bind("<<ComboboxSelected>>", lambda e: self.choose_effect())
-        self.button(erow, "Import…", self.import_files).pack(side="left", padx=(8, 0))
-        self.button(erow, "Folder", self.open_folder).pack(side="left", padx=(4, 0))
-        tk.Label(root, text="Import Synapse Chroma Studio exports (.ChromaEffects) — they're remapped to your devices",
-                 bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left").pack(anchor="w", **pad)
-        self.refresh_effects()
-
-        # Colors
-        self.section("Colors")
-        self.color_area = tk.Frame(root, bg=BG)
-        self.color_area.pack(anchor="w", fill="x")
-        row = tk.Frame(self.color_area, bg=BG)
-        row.pack(anchor="w", **pad)
-        self.c1_btn = self.color_button(row, "color1", s["color1"], "Color 1")
-        self.c2_btn = self.color_button(row, "color2", s["color2"], "Color 2")
-        presets = tk.Frame(self.color_area, bg=BG)
-        presets.pack(anchor="w", pady=(8, 0), **pad)
-        tk.Label(presets, text="Quick:", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(0, 6))
-        for p in PRESETS:
-            sw = tk.Label(presets, bg=p, width=2, height=1, cursor="hand2", relief="flat")
-            sw.pack(side="left", padx=2)
-            sw.bind("<Button-1>", lambda e, c=p: self.set_color("color1", c))
-            sw.bind("<Button-3>", lambda e, c=p: self.set_color("color2", c))
-        self.color_hint = tk.Label(self.color_area, text="", bg=BG, fg=MUTED, font=("Segoe UI", 8))
-        self.color_hint.pack(anchor="w", **pad)
-        self.update_color_hint()
-
-        # Sliders
-        self.sliders = {}
-        self.section("Brightness")
-        self.slider(0, 100, s["brightness"], "brightness")
-        self.section("Speed")
-        self.slider(1, 10, s["speed"], "speed")
-        self.select_target("all")
-
-        # Devices
-        self.section("Devices")
-        drow = tk.Frame(root, bg=BG)
-        drow.pack(anchor="w", **pad)
-        self.dev_vars = {}
-        for kind, dev in engine.devices.items():
-            v = tk.BooleanVar(value=s["devices"].get(kind, True))
-            self.dev_vars[kind] = v
-            tk.Checkbutton(drow, text=dev.label, variable=v, command=self.devices_changed, bg=BG, fg=FG,
-                           selectcolor=PANEL, activebackground=BG, activeforeground=FG,
-                           font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
-
-        # Options
-        self.section("Options")
-        self.keypress = tk.BooleanVar(value=s["keypress_effects"])
-        self.option(root, "Light up keys when pressed (effect files)", self.keypress,
-                    lambda: self.push(keypress_effects=self.keypress.get()))
-        self.to_tray = tk.BooleanVar(value=s["close_to_tray"])
-        self.option(root, "Keep running in the tray when closed", self.to_tray, self.tray_option_changed)
-        self.startup = tk.BooleanVar(value=os.path.exists(STARTUP_VBS))
-        self.option(root, "Start with Windows (in the tray)", self.startup, self.toggle_startup)
-        self.close_hint = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=360, justify="left")
-        self.close_hint.pack(anchor="w", pady=(4, 14), **pad)
-        self.update_close_hint()
-
-        self.ui_queue = queue.Queue()
-        self.tray = tray.Tray(ICON_PATH, APP_NAME, lambda: self.ui_queue.put("open"), lambda: self.ui_queue.put("exit"))
+        self.razer.start()
+        self.dynlight.start()
+        self.engine.start()
         self.tray_ok = self.tray.start()
-
-        self.tick()
-
-    # widgets
-    def option(self, parent, text, var, command):
-        tk.Checkbutton(parent, text=text, variable=var, command=command, bg=BG, fg=FG, selectcolor=PANEL,
-                       activebackground=BG, activeforeground=FG, font=("Segoe UI", 9)).pack(anchor="w", padx=16)
-
-    def section(self, text):
-        tk.Label(self.root, text=text.upper(), bg=BG, fg=MUTED, font=("Segoe UI Semibold", 8)).pack(anchor="w", padx=16, pady=(12, 4))
-
-    def button(self, parent, text, cmd):
-        return tk.Button(parent, text=text, command=cmd, bg=PANEL, fg=FG, activebackground="#2A2A30", activeforeground=FG,
-                         relief="flat", bd=0, padx=10, pady=3, font=("Segoe UI", 9), cursor="hand2")
-
-    def color_button(self, parent, key, value, label):
-        f = tk.Frame(parent, bg=BG)
-        f.pack(side="left", padx=(0, 14))
-        b = tk.Label(f, bg=value, width=6, height=2, cursor="hand2", relief="flat", bd=0)
-        b.pack(side="left")
-        lbl = tk.Label(f, text=f"{label}\n{value}", bg=BG, fg=FG, font=("Segoe UI", 9), justify="left")
-        lbl.pack(side="left", padx=6)
-        b.bind("<Button-1>", lambda e: self.pick(key))
-        b.text_lbl, b.caption = lbl, label
-        return b
-
-    def slider(self, lo, hi, val, key):
-        f = tk.Frame(self.root, bg=BG)
-        f.pack(anchor="w", padx=16, fill="x")
-        var = tk.IntVar(value=val)
-        out = tk.Label(f, text=str(val), bg=BG, fg=FG, width=4, font=("Segoe UI", 10))
-
-        def changed(v):
-            iv = int(float(v))
-            var.set(iv)
-            out.config(text=str(iv))
-            if not self.loading:
-                self.push_profile(**{key: iv})
-
-        scale = ttk.Scale(f, from_=lo, to=hi, value=val, command=changed, length=300)
-        scale.pack(side="left")
-        out.pack(side="left", padx=6)
-        self.sliders[key] = scale
-
-    # per-device editing
-    def current_profile(self):
-        s = self.engine.snapshot()
-        return {k: s[k] for k in PROFILE_KEYS} if self.target == "all" else self.engine.profile(s, self.target)
-
-    def select_target(self, target):
-        self.target = target
-        overrides = self.engine.snapshot()["overrides"]
-        for key, b in self.tab_buttons.items():
-            label = "All devices" if key == "all" else self.engine.devices[key].label
-            if key in overrides:
-                label += " •"  # has its own effect
-            selected = key == target
-            b.config(text=label, bg=PANEL if selected else BG, fg=FG if selected else MUTED)
-        self.own_check.pack_forget()
-        self.own_hint.pack_forget()
-        if target == "all":
-            own = True
-            mine = [self.engine.devices[k].label for k in overrides]
-            self.own_hint.config(text="Applies to every device" + (" except " + ", ".join(mine) if mine else "")
-                                 + ". Pick a device above to give it its own effect.")
-        else:
-            own = target in overrides
-            self.own_var.set(own)
-            self.own_check.pack(anchor="w")
-            self.own_hint.config(text="" if own else "Following All devices. Tick the box to customize this device.")
-        if self.own_hint.cget("text"):
-            self.own_hint.pack(anchor="w")
-        self.load_controls()
-        self.set_controls_enabled(own)
-
-    def toggle_own(self):
-        self.engine.set_override(self.target, self.own_var.get())
-        save_settings(self.engine.snapshot())
-        self.select_target(self.target)
-
-    def load_controls(self):
-        """Show the selected device's settings without writing them back."""
-        p = self.current_profile()
-        self.loading = True
-        try:
-            self.effect.set(p["effect"])
-            for key in ("color1", "color2"):
-                btn = self.c1_btn if key == "color1" else self.c2_btn
-                btn.config(bg=p[key])
-                btn.text_lbl.config(text=f"{btn.caption}\n{p[key]}")
-            for key in ("brightness", "speed"):
-                self.sliders[key].set(p[key])
-        finally:
-            self.loading = False
-        self.update_color_hint()
-
-    def set_controls_enabled(self, enabled):
-        self.controls_enabled = enabled
-        self.effect_cb.config(state="readonly" if enabled else "disabled")
-        for scale in self.sliders.values():
-            scale.state(["!disabled"] if enabled else ["disabled"])
-        for btn in (self.c1_btn, self.c2_btn):
-            btn.config(cursor="hand2" if enabled else "arrow")
-
-    def push_profile(self, **changes):
-        if not self.controls_enabled:
-            return
-        self.engine.update_profile(self.target, changes)
-        save_settings(self.engine.snapshot())
-
-    # actions
-    def push(self, **changes):
-        self.engine.update(**changes)
-        save_settings(self.engine.snapshot())
-
-    def refresh_effects(self):
-        self.effect_cb.config(values=EFFECTS + [FILE_PREFIX + n for n in effect_files()])
-
-    def choose_effect(self):
-        self.push_profile(effect=self.effect.get())
-        self.update_color_hint()
-
-    def update_color_hint(self):
-        if self.effect.get().startswith(FILE_PREFIX):
-            self.color_hint.config(text="Effect files use their own colors — brightness and speed still apply")
-        else:
-            self.color_hint.config(text="Left-click sets Color 1, right-click sets Color 2")
-
-    def import_files(self):
-        start = next((d for d in (os.path.expanduser(r"~\Downloads"), os.path.expanduser(r"~\Desktop"))
-                      if os.path.isdir(d)), os.path.expanduser("~"))
-        paths = filedialog.askopenfilenames(parent=self.root, title="Import Chroma Studio effects", initialdir=start,
-                                            filetypes=[("Chroma Studio effects", "*" + EFFECT_EXT), ("All files", "*.*")])
-        if not paths:
-            return
-        os.makedirs(EFFECTS_DIR, exist_ok=True)
-        ok, bad = [], []
-        for p in paths:
-            try:
-                ce.ChromaEffect(p)  # validate before copying
-                name = os.path.basename(p)
-                if not name.lower().endswith(EFFECT_EXT.lower()):
-                    name += EFFECT_EXT
-                shutil.copyfile(p, os.path.join(EFFECTS_DIR, name))
-                ok.append(name[:-len(EFFECT_EXT)])
-            except Exception:
-                bad.append(os.path.basename(p))
-        self.refresh_effects()
-        if ok and self.controls_enabled:  # play the first import on the device being edited
-            self.effect.set(FILE_PREFIX + ok[0])
-            self.choose_effect()
-        msg = f"Imported {len(ok)} effect(s)."
-        if bad:
-            msg += " Not valid Chroma Studio files: " + ", ".join(bad)
-        self.status_lbl.config(text=msg)
-        self.hold_status_until = time.time() + 4
-
-    def open_folder(self):
-        os.makedirs(EFFECTS_DIR, exist_ok=True)
-        os.startfile(EFFECTS_DIR)
-        self.root.after(1500, self.refresh_effects)
-
-    def pick(self, key):
-        if not self.controls_enabled:
-            return
-        cur = self.current_profile()[key]
-        res = colorchooser.askcolor(color=cur, title="Choose color", parent=self.root)
-        if res and res[1]:
-            self.set_color(key, res[1].upper())
-
-    def set_color(self, key, value):
-        if not self.controls_enabled:
-            return
-        btn = self.c1_btn if key == "color1" else self.c2_btn
-        btn.config(bg=value)
-        btn.text_lbl.config(text=f"{btn.caption}\n{value}")
-        self.push_profile(**{key: value})
-
-    def devices_changed(self):
-        self.push(devices={d: v.get() for d, v in self.dev_vars.items()})
-
-    def toggle_startup(self):
-        try:
-            if self.startup.get():
-                if FROZEN:
-                    args = f'""{sys.executable}""'
-                else:
-                    exe = sys.executable
-                    if exe.lower().endswith("python.exe"):
-                        exe = exe[:-10] + "pythonw.exe"
-                    args = f'""{exe}"" ""{os.path.abspath(__file__)}""'
-                with open(STARTUP_VBS, "w", encoding="utf-8") as f:
-                    f.write(f'CreateObject("WScript.Shell").Run "{args} --minimized", 0, False\n')
-            elif os.path.exists(STARTUP_VBS):
-                os.remove(STARTUP_VBS)
-        except OSError as e:
-            self.status_lbl.config(text=f"Couldn't update startup: {e}")
-
-    hold_status_until = 0.0
-
-    def tray_option_changed(self):
-        self.push(close_to_tray=self.to_tray.get())
-        self.update_close_hint()
-
-    def update_close_hint(self):
-        if self.to_tray.get():
-            text = "Closing the window keeps your lighting on from the tray. Right-click the tray icon → Exit to quit."
-        else:
-            text = "Closing the window quits ChromaLite and hands lighting back to Synapse."
-        self.close_hint.config(text=text)
-
-    def show(self):
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_force()
-
-    def tick(self):
-        while not self.ui_queue.empty():
-            action = self.ui_queue.get_nowait()
-            if action == "open":
-                self.show()
-            elif action == "exit":
-                self.quit()
-                return
-        if self.root.state() == "withdrawn":  # hidden in the tray: nothing to draw
-            self.root.after(150, self.tick)
-            return
-        if time.time() > self.hold_status_until:
-            self.status_lbl.config(text=self.engine.status)
-        c = self.preview
-        c.delete("all")
-        cells = self.engine.previews["keyboard" if self.target == "all" else self.target]
-        w = 360 / len(cells)
-        for i, col in enumerate(cells):
-            c.create_rectangle(i * w + 1, 2, (i + 1) * w - 1, 24, fill=rgb_to_hex(col), outline="")
-        self.root.after(60, self.tick)
-
-    def hide_to_tray(self):
-        self.root.withdraw()
-
-    def on_close(self):
-        if not (self.tray_ok and self.to_tray.get()):
-            self.quit()
-            return
-        self.hide_to_tray()
-        if not self.engine.snapshot()["tray_hint_shown"]:
-            self.tray.notify("ChromaLite is still running", "Your lighting stays on. Right-click the tray icon to exit.")
-            self.push(tray_hint_shown=True)
-
-    def quit(self):
-        save_settings(self.engine.snapshot())
+        webview.start(gui="edgechromium", private_mode=False,
+                      storage_path=os.path.join(en.CONFIG_DIR, "webview"))
+        # window closed for good
         self.tray.stop()
         self.engine.stop_evt.set()
         self.engine.dirty.set()
         self.engine.join(timeout=3)
-        self.root.destroy()
+        self.razer.stop()
+        self.dynlight.stop()
+
+    def show(self):
+        self.window.show()
+        self.window.restore()
+        style_title_bar(self.window)
+
+    def quit(self):
+        self.quitting = True
+        self.window.destroy()
+
+    def on_closing(self):
+        if self.quitting or not self.tray_ok or not self.engine.snapshot()["close_to_tray"]:
+            self.quitting = True
+            return True
+        # Keep running in the tray; tell the page so it can explain once.
+        threading.Thread(target=self._hide_soon, daemon=True).start()
+        return False
+
+    def _hide_soon(self):
+        time.sleep(0.05)
+        self.window.hide()
+        if not self.engine.snapshot()["tray_hint_shown"]:
+            self.tray.notify("ChromaLite is still running", "Your lighting stays on. Right-click the tray icon to exit.")
+            self.engine.update(tray_hint_shown=True)
+            en.save_settings(self.engine.snapshot())
 
 
+# ---------------------------------------------------------------- startup
 def migrate_legacy_config():
     """Carry settings and imported effects over from the pre-rename folder."""
-    if os.path.isdir(CONFIG_DIR) or not os.path.isdir(LEGACY_CONFIG_DIR):
+    if os.path.isdir(en.CONFIG_DIR) or not os.path.isdir(en.LEGACY_CONFIG_DIR):
         return
     try:
-        shutil.copytree(LEGACY_CONFIG_DIR, CONFIG_DIR)
+        shutil.copytree(en.LEGACY_CONFIG_DIR, en.CONFIG_DIR)
     except OSError:
         pass
 
@@ -811,16 +379,7 @@ def main():
             ctypes.windll.user32.MessageBoxW(None, "ChromaLite is already running.", APP_NAME, 0x40)
         return
     migrate_legacy_config()
-    engine = Engine(load_settings())
-    engine.start()
-    root = tk.Tk()
-    app = App(root, engine)
-    if "--minimized" in sys.argv:
-        if app.tray_ok:
-            app.hide_to_tray()
-        else:
-            root.iconify()
-    root.mainloop()
+    App(minimized="--minimized" in sys.argv).run()
 
 
 if __name__ == "__main__":
