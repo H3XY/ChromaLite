@@ -1,7 +1,7 @@
 """
 Razer devices through the Razer Chroma SDK REST server that ships with Synapse
 (http://localhost:54235). Works in the background, so lighting keeps running
-while ChromaLite sits in the tray.
+while Prismatic sits in the tray.
 
 The SDK addresses devices by type (keyboard / mouse / mousepad), not by model,
 so device names come from Windows' list of connected USB devices.
@@ -92,7 +92,7 @@ class ChromaSession:
         res = self._request(SDK_HOST, SDK_PORT, "POST", "/razer/chromasdk", {
             "title": app_name,
             "description": "Lightweight lighting controller",
-            "author": {"name": "ChromaLite", "contact": "https://github.com/H3XY/ChromaLite"},
+            "author": {"name": "Prismatic", "contact": "https://github.com/H3XY/Prismatic"},
             "device_supported": ["keyboard", "mouse", "mousepad"],
             "category": "application",
         })

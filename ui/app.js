@@ -1,5 +1,5 @@
 "use strict";
-/* ChromaLite interface. Talks to Python through pywebview.api (see chromalite.pyw: Api). */
+/* Prismatic interface. Talks to Python through pywebview.api (see prismatic.pyw: Api). */
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -44,7 +44,7 @@ const I = {
   github: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.7-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7 3.6 3.6 0 0 1 .1-2.7s.8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14l2-2 2 2 2-3"/></svg>',
 };
-const LOGO = (id) => `<svg viewBox="0 0 48 48" class="logo"><defs><linearGradient id="lg${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5cb0ff"/><stop offset=".55" stop-color="#2f8cff"/><stop offset="1" stop-color="#8a5cff"/></linearGradient></defs><circle cx="24" cy="24" r="17" fill="none" stroke="url(#lg${id})" stroke-width="6"/><circle cx="24" cy="24" r="5" fill="#5cb0ff"/></svg>`;
+const LOGO = (id) => `<svg viewBox="0 0 48 48" class="logo"><defs><linearGradient id="pe${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3b5c"/><stop offset=".2" stop-color="#ffb000"/><stop offset=".4" stop-color="#3ddc6a"/><stop offset=".6" stop-color="#2fd2ff"/><stop offset=".8" stop-color="#2f8cff"/><stop offset="1" stop-color="#9b5cff"/></linearGradient><linearGradient id="pc${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cb0ff"/><stop offset="1" stop-color="#2f8cff"/></linearGradient></defs><path d="M24 8.5 L38.5 34.5 L9.5 34.5 Z" fill="#121a28" stroke="url(#pe${id})" stroke-width="4.4" stroke-linejoin="round"/><path d="M24 18.6 L30.1 29.5 L17.9 29.5 Z" fill="url(#pc${id})"/></svg>`;
 
 /* ------------------------------------------------------------------ helpers */
 const device = (id) => S.devices.find((d) => d.id === id);
@@ -101,7 +101,7 @@ function signature() {
 function renderShell() {
   $("#root").innerHTML = `<div class="app">
     <aside class="sidebar">
-      <div class="brand">${LOGO("s")}<div class="word">CHROMA<b>LITE</b></div></div>
+      <div class="brand">${LOGO("s")}<div class="word">PRISM<b>ATIC</b></div></div>
       <nav class="nav" id="nav"></nav>
       <div class="side-foot" id="sources"></div>
     </aside>
@@ -151,7 +151,7 @@ function pageDevices() {
       <div class="actions"><button class="btn primary" data-act="open" data-arg="all">${I.lighting}Customize lighting</button></div>
     </div></div>`;
   if (!S.devices.length) {
-    return head("Overview", "Devices", "Everything ChromaLite is lighting up") + `<div class="panel">${emptyDevices()}</div>`;
+    return head("Overview", "Devices", "Everything Prismatic is lighting up") + `<div class="panel">${emptyDevices()}</div>`;
   }
   const cards = [...S.devices].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]).map((d) => {
     const p = profileOf(d.id);
@@ -164,12 +164,12 @@ function pageDevices() {
         <div class="effect">${statusChip(d)}<span class="muted">${d.own ? esc(effectLabel(p.effect)) : "Following All devices"}</span></div>
       </div></div>`;
   }).join("");
-  return head("Overview", "Devices", "Everything ChromaLite is lighting up") + hero + `<h2>Your devices</h2><div class="grid">${cards}</div>`;
+  return head("Overview", "Devices", "Everything Prismatic is lighting up") + hero + `<h2>Your devices</h2><div class="grid">${cards}</div>`;
 }
 
 function emptyDevices() {
   return `<div class="empty">${I.devices}<div class="t">No lighting devices found yet</div>
-    <p>ChromaLite controls Razer devices through Razer Synapse, and devices from other brands through Windows Dynamic Lighting.
+    <p>Prismatic controls Razer devices through Razer Synapse, and devices from other brands through Windows Dynamic Lighting.
     Check that your devices are plugged in, and see Settings for each source's status.</p>
     <button class="btn" data-act="nav" data-arg="settings">${I.settings}Open settings</button></div>`;
 }
@@ -189,10 +189,10 @@ function pageLighting() {
   let notices = "";
   for (const e of S.errors) notices += `<div class="notice">${I.warn}<div>${esc(e)}</div></div>`;
   if (d && d.enabled && !d.available) {
-    notices += `<div class="notice">${I.info}<div><b>Paused while ChromaLite is in the background.</b> Windows only lets the app in front control Dynamic Lighting devices, so this device follows ChromaLite while its window is active.</div></div>`;
+    notices += `<div class="notice">${I.info}<div><b>Paused while Prismatic is in the background.</b> Windows only lets the app in front control Dynamic Lighting devices, so this device follows Prismatic while its window is active.</div></div>`;
   }
   if (!d && S.devices.some((x) => x.source === "Windows Dynamic Lighting")) {
-    notices += `<div class="notice info">${I.info}<div>Devices using Windows Dynamic Lighting follow ChromaLite while its window is in front. Razer devices work in the background through Synapse.</div></div>`;
+    notices += `<div class="notice info">${I.info}<div>Devices using Windows Dynamic Lighting follow Prismatic while its window is in front. Razer devices work in the background through Synapse.</div></div>`;
   }
   const title = d ? d.name : "All devices";
   const sub = d ? `${esc(d.brand)} · ${esc(d.source)} · ${d.leds} LEDs` : `Applies to every device that isn't using its own effect`;
@@ -315,7 +315,7 @@ function pageSettings() {
   const razer = S.sources[0], dl = S.sources[1];
   return head("Preferences", "Settings", "") + `<div class="settings">
     <div><h2>General</h2><div class="panel">
-      ${settingRow(I.power, "Start with Windows", "Launch ChromaLite in the tray when you sign in.", "start_with_windows", st.start_with_windows)}
+      ${settingRow(I.power, "Start with Windows", "Launch Prismatic in the tray when you sign in.", "start_with_windows", st.start_with_windows)}
       ${settingRow(I.tray, "Keep running in the tray when closed", "Your lighting stays on after you close the window. Right-click the tray icon → Exit to quit.", "close_to_tray", st.close_to_tray)}
     </div></div>
     <div><h2>Lighting</h2><div class="panel">
@@ -323,9 +323,9 @@ function pageSettings() {
     </div></div>
     <div><h2>Device sources</h2><div class="panel">
       <div class="row"><div class="ico">${I.chip}</div><div class="txt"><b>Razer Chroma <span class="dot ${sourceKind(razer)}" style="display:inline-block;margin-left:6px"></span></b>
-        <span>${esc(razer.status)}</span><span>Controls Razer devices through Razer Synapse, including while ChromaLite is in the tray.</span></div></div>
+        <span>${esc(razer.status)}</span><span>Controls Razer devices through Razer Synapse, including while Prismatic is in the tray.</span></div></div>
       ${settingRow(I.windows, `Windows Dynamic Lighting <span class="dot ${sourceKind(dl)}" style="display:inline-block;margin-left:6px"></span>`,
-        `${esc(dl.status)}. Controls devices from Logitech, Corsair, SteelSeries, HyperX, ASUS and more that support Windows 11 Dynamic Lighting. Windows only lets the app in front control these, so they follow ChromaLite while its window is active.`,
+        `${esc(dl.status)}. Controls devices from Logitech, Corsair, SteelSeries, HyperX, ASUS and more that support Windows 11 Dynamic Lighting. Windows only lets the app in front control these, so they follow Prismatic while its window is active.`,
         "dynamic_lighting", st.dynamic_lighting)}
     </div></div>
     <div><h2>Data</h2><div class="panel">
@@ -337,17 +337,17 @@ function pageSettings() {
 
 function pageAbout() {
   return `<div class="about"><div class="panel hero-a">${LOGO("a")}<div>
-      <div class="eyebrow">Version ${esc(S.version)}</div><h1>ChromaLite</h1>
+      <div class="eyebrow">Version ${esc(S.version)}</div><h1>Prismatic</h1>
       <div class="sub">A lightweight lighting app for gaming keyboards, mice and mousepads.</div></div></div>
     <div class="panel pad" style="margin-top:16px">
-      <p style="margin-top:0">ChromaLite controls Razer devices through Razer Synapse's Chroma SDK, and devices from other brands through Windows Dynamic Lighting.
+      <p style="margin-top:0">Prismatic controls Razer devices through Razer Synapse's Chroma SDK, and devices from other brands through Windows Dynamic Lighting.
       It can also play effects exported from Synapse 3's Chroma Studio, remapped to fit whatever devices you own.</p>
       <div class="links">
         <button class="btn" data-act="link" data-arg="repo">${I.github}GitHub</button>
         <button class="btn" data-act="link" data-arg="issues">Report a problem</button>
         <button class="btn" data-act="link" data-arg="releases">Check for updates</button>
       </div>
-      <div class="fine">Open source under the MIT License. ChromaLite is an independent project and is not affiliated with, endorsed by, or supported by
+      <div class="fine">Open source under the MIT License. Prismatic is an independent project and is not affiliated with, endorsed by, or supported by
       Razer Inc. or any other device maker. Razer, Chroma and Synapse are trademarks of Razer Inc.; other names are trademarks of their owners.</div>
     </div></div>`;
 }
@@ -410,7 +410,7 @@ function onChange(e) {
     if (a === "enabled") return act(api().set_enabled(arg, el.checked));
     if (a === "sync") return act(api().set_own(arg, !el.checked));
     if (a === "setting") return act(api().set_setting(arg, el.checked)).then(() => {
-      if (arg === "start_with_windows") toast(el.checked ? "ChromaLite will start with Windows" : "ChromaLite won't start with Windows");
+      if (arg === "start_with_windows") toast(el.checked ? "Prismatic will start with Windows" : "Prismatic won't start with Windows");
     });
   }
   if (el.type === "range") { dragging = false; refresh(true); }

@@ -1,4 +1,4 @@
-# Needed to run ChromaLite from source (the .exe bundles these).
+# Needed to run Prismatic from source (the .exe bundles these).
 pywebview==6.2.1
 winrt-runtime==3.2.1
 winrt-Windows.Devices.Enumeration==3.2.1

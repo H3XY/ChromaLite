@@ -1,10 +1,10 @@
 """
 System tray icon using the Win32 API via ctypes (no extra packages), so
-ChromaLite can keep running after its window is closed.
+Prismatic can keep running after its window is closed.
 
 The icon lives on its own thread with a hidden window and message loop.
 Callbacks run on that thread, so the caller must hand work back to its own
-UI thread (ChromaLite uses a queue polled by Tk).
+UI thread (pywebview's window methods do that themselves).
 """
 import ctypes
 import threading
@@ -17,7 +17,7 @@ kernel32 = ctypes.windll.kernel32
 LRESULT = ctypes.c_ssize_t
 WNDPROC = ctypes.WINFUNCTYPE(LRESULT, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
 
-CLASS_NAME = "ChromaLite.TrayWindow"
+CLASS_NAME = "Prismatic.TrayWindow"
 WM_DESTROY, WM_CLOSE, WM_COMMAND, WM_NULL = 0x0002, 0x0010, 0x0111, 0x0000
 WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONUP = 0x0202, 0x0203, 0x0205
 WM_TRAY = 0x8000 + 1      # WM_APP + 1: icon events
@@ -72,7 +72,7 @@ kernel32.GetModuleHandleW.restype = w.HMODULE
 
 
 def show_existing_instance():
-    """Ask an already-running ChromaLite to show its window. True if one answered."""
+    """Ask an already-running Prismatic to show its window. True if one answered."""
     hwnd = user32.FindWindowW(CLASS_NAME, None)
     return bool(hwnd) and bool(user32.PostMessageW(hwnd, WM_SHOW_REQ, 0, 0))
 
@@ -118,7 +118,7 @@ class Tray:
         user32.RegisterClassW(ctypes.byref(wc))
         # A plain hidden top-level window (not message-only) so it receives
         # the TaskbarCreated broadcast when Explorer restarts.
-        self.hwnd = user32.CreateWindowExW(0, CLASS_NAME, "ChromaLite", 0, 0, 0, 0, 0, None, None, hinst, None)
+        self.hwnd = user32.CreateWindowExW(0, CLASS_NAME, "Prismatic", 0, 0, 0, 0, 0, None, None, hinst, None)
         if not self.hwnd:
             self._ready.set()
             return
@@ -133,7 +133,7 @@ class Tray:
 
     def _menu(self):
         menu = user32.CreatePopupMenu()
-        user32.AppendMenuW(menu, MF_STRING, CMD_OPEN, "Open ChromaLite")
+        user32.AppendMenuW(menu, MF_STRING, CMD_OPEN, "Open Prismatic")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, CMD_EXIT, "Exit")
         pt = w.POINT()

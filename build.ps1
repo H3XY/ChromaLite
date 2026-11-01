@@ -1,6 +1,6 @@
-# Builds dist\ChromaLite.exe (a single file, no Python needed to run it).
+# Builds dist\Prismatic.exe (a single file, no Python needed to run it).
 # Usage:  powershell -ExecutionPolicy Bypass -File build.ps1
-# Set $env:CHROMALITE_VENV to put the build environment elsewhere (e.g. a
+# Set $env:PRISMATIC_VENV to put the build environment elsewhere (e.g. a
 # shorter path if pip hits Windows' 260-character path limit).
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -10,7 +10,7 @@ function Run($exe) {
     if ($LASTEXITCODE -ne 0) { throw "Failed: $exe $args" }
 }
 
-$venv = if ($env:CHROMALITE_VENV) { $env:CHROMALITE_VENV } else { ".venv" }
+$venv = if ($env:PRISMATIC_VENV) { $env:PRISMATIC_VENV } else { ".venv" }
 $py = Join-Path $venv "Scripts\python.exe"
 if (-not (Test-Path $py)) {
     Run py -3 -m venv $venv
@@ -19,11 +19,11 @@ Run $py -m ensurepip --upgrade
 Run $py -m pip install --quiet -r requirements.txt -r requirements-build.txt
 
 Run $py tools\make_icon.py
-$icon = (Resolve-Path assets\chromalite.ico).Path
+$icon = (Resolve-Path assets\prismatic.ico).Path
 $ui = (Resolve-Path ui).Path
 
 Run $py -m PyInstaller --noconfirm --clean --onefile --windowed `
-    --name ChromaLite `
+    --name Prismatic `
     --icon $icon `
     --add-data "$icon;assets" `
     --add-data "$ui;ui" `
@@ -31,6 +31,6 @@ Run $py -m PyInstaller --noconfirm --clean --onefile --windowed `
     --hidden-import winrt.windows.foundation.collections `
     --hidden-import winrt.windows.foundation.numerics `
     --workpath (Join-Path $venv "pyi-build") --specpath (Join-Path $venv "pyi-build") `
-    chromalite.pyw
+    prismatic.pyw
 
-Write-Host "Built $(Resolve-Path dist\ChromaLite.exe)"
+Write-Host "Built $(Resolve-Path dist\Prismatic.exe)"

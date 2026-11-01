@@ -7,7 +7,7 @@ it sits under, so effects map onto these devices properly.
 
 Limitation: Windows only gives lighting control to the app in the foreground
 (or to packaged apps chosen under Settings > Personalization > Dynamic
-Lighting > Background light control). So these devices follow ChromaLite
+Lighting > Background light control). So these devices follow Prismatic
 while its window is in front, and Windows takes them back otherwise.
 """
 import array

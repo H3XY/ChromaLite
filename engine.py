@@ -20,8 +20,9 @@ FPS = 30
 SMOOTHING_S = 0.06  # time constant of the per-LED ease between frames
 
 APPDATA = os.environ.get("APPDATA", os.path.expanduser("~"))
-CONFIG_DIR = os.path.join(APPDATA, "ChromaLite")
-LEGACY_CONFIG_DIR = os.path.join(APPDATA, "RazerLighting")  # pre-rename location
+CONFIG_DIR = os.path.join(APPDATA, "Prismatic")
+# Earlier names' settings folders, newest first: ChromaLite (1.x-2.0 previews), RazerLighting (first version)
+LEGACY_CONFIG_DIRS = [os.path.join(APPDATA, "ChromaLite"), os.path.join(APPDATA, "RazerLighting")]
 CONFIG_PATH = os.path.join(CONFIG_DIR, "settings.json")
 EFFECTS_DIR = os.path.join(CONFIG_DIR, "effects")
 EFFECT_EXT = ".ChromaEffects"

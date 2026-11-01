@@ -1,5 +1,5 @@
 """
-ChromaLite — a lightweight lighting app for gaming keyboards, mice and mousepads.
+Prismatic — a lightweight lighting app for gaming keyboards, mice and mousepads.
 
 Razer devices are controlled through the Razer Chroma SDK that ships with
 Synapse; devices from other brands through Windows Dynamic Lighting. Also
@@ -8,7 +8,7 @@ plays Synapse 3 Chroma Studio effect files (.ChromaEffects) on any of them.
 The window is an HTML interface (ui/) shown with pywebview (WebView2); this
 file wires it to the engine and keeps the app alive in the system tray.
 
-Run from source:  pyw chromalite.pyw   (add --minimized to start in the tray)
+Run from source:  pyw prismatic.pyw   (add --minimized to start in the tray)
 """
 import ctypes
 import os
@@ -26,16 +26,18 @@ import tray
 from backend_dynlight import DynamicLightingBackend
 from backend_razer import RazerBackend
 
-APP_NAME = "ChromaLite"
+APP_NAME = "Prismatic"
 APP_VERSION = "2.0.0"
-REPO_URL = "https://github.com/H3XY/ChromaLite"
+REPO_URL = "https://github.com/H3XY/Prismatic"
 LINKS = {"repo": REPO_URL, "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases"}
 
 FROZEN = getattr(sys, "frozen", False)  # running as the PyInstaller .exe
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-ICON_PATH = os.path.join(BASE_DIR, "assets", "chromalite.ico")
+ICON_PATH = os.path.join(BASE_DIR, "assets", "prismatic.ico")
 UI_INDEX = os.path.join(BASE_DIR, "ui", "index.html")
-STARTUP_VBS = os.path.join(en.APPDATA, r"Microsoft\Windows\Start Menu\Programs\Startup\ChromaLite.vbs")
+STARTUP_DIR = os.path.join(en.APPDATA, r"Microsoft\Windows\Start Menu\Programs\Startup")
+STARTUP_VBS = os.path.join(STARTUP_DIR, "Prismatic.vbs")
+LEGACY_STARTUP_VBS = os.path.join(STARTUP_DIR, "ChromaLite.vbs")  # created by the app's earlier name
 
 WINDOW_BG = "#07090D"
 
@@ -349,26 +351,35 @@ class App:
         time.sleep(0.05)
         self.window.hide()
         if not self.engine.snapshot()["tray_hint_shown"]:
-            self.tray.notify("ChromaLite is still running", "Your lighting stays on. Right-click the tray icon to exit.")
+            self.tray.notify("Prismatic is still running", "Your lighting stays on. Right-click the tray icon to exit.")
             self.engine.update(tray_hint_shown=True)
             en.save_settings(self.engine.snapshot())
 
 
 # ---------------------------------------------------------------- startup
 def migrate_legacy_config():
-    """Carry settings and imported effects over from the pre-rename folder."""
-    if os.path.isdir(en.CONFIG_DIR) or not os.path.isdir(en.LEGACY_CONFIG_DIR):
-        return
-    try:
-        shutil.copytree(en.LEGACY_CONFIG_DIR, en.CONFIG_DIR)
-    except OSError:
-        pass
+    """Carry settings and imported effects over from the app's earlier names,
+    and move a "start with Windows" entry made under an earlier name."""
+    if not os.path.isdir(en.CONFIG_DIR):
+        for old in en.LEGACY_CONFIG_DIRS:
+            if os.path.isdir(old):
+                try:
+                    shutil.copytree(old, en.CONFIG_DIR, ignore=shutil.ignore_patterns("webview"))
+                except OSError:
+                    pass
+                break
+    if os.path.exists(LEGACY_STARTUP_VBS):
+        try:
+            os.remove(LEGACY_STARTUP_VBS)
+            set_startup(True)  # point it at this copy of the app instead
+        except OSError:
+            pass
 
 
 def already_running():
     """Two instances would fight over the lights, so only allow one."""
     kernel32 = ctypes.windll.kernel32
-    kernel32.CreateMutexW(None, False, "Local\\ChromaLite.SingleInstance")
+    kernel32.CreateMutexW(None, False, "Local\\Prismatic.SingleInstance")
     return kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
 
 
@@ -376,7 +387,7 @@ def main():
     if already_running():
         # Launching again (e.g. from the Start menu) brings the running copy back.
         if not tray.show_existing_instance():
-            ctypes.windll.user32.MessageBoxW(None, "ChromaLite is already running.", APP_NAME, 0x40)
+            ctypes.windll.user32.MessageBoxW(None, "Prismatic is already running.", APP_NAME, 0x40)
         return
     migrate_legacy_config()
     App(minimized="--minimized" in sys.argv).run()

@@ -1,11 +1,13 @@
-# ChromaLite
+# Prismatic
+
+*Formerly ChromaLite.*
 
 A lightweight lighting app for gaming keyboards, mice and mousepads on
 Windows. Control Razer devices without the Synapse interface, light up devices
 from other brands through Windows Dynamic Lighting, and play your old
 **Synapse 3 Chroma Studio effects** on any of them.
 
-> ChromaLite is an independent project. It is not affiliated with, endorsed by,
+> Prismatic is an independent project. It is not affiliated with, endorsed by,
 > or supported by Razer Inc. or any other device maker. "Razer", "Chroma" and
 > "Synapse" are trademarks of Razer Inc.; other names are trademarks of their
 > owners.
@@ -14,7 +16,7 @@ from other brands through Windows Dynamic Lighting, and play your old
 
 - **Works across brands**
   - **Razer** devices through the Razer Chroma SDK that comes with Synapse —
-    including while ChromaLite runs in the background.
+    including while Prismatic runs in the background.
   - **Logitech, Corsair, SteelSeries, HyperX, ASUS and more** through Windows 11
     **Dynamic Lighting**, for any device that supports it.
   - A device is only ever controlled one way: Razer devices use Synapse when
@@ -43,7 +45,7 @@ from other brands through Windows Dynamic Lighting, and play your old
 
 ## Install
 
-Download `ChromaLite.exe` from the [Releases](../../releases) page and run it.
+Download `Prismatic.exe` from the [Releases](../../releases) page and run it.
 No installer, no Python needed.
 
 Windows SmartScreen may warn about an unsigned app the first time; choose
@@ -51,7 +53,7 @@ Windows SmartScreen may warn about an unsigned app the first time; choose
 
 ## Using it
 
-- **Devices** shows everything ChromaLite is lighting, with live previews.
+- **Devices** shows everything Prismatic is lighting, with live previews.
   Each device has an on/off switch; click a device to customize it.
 - **Lighting** sets the effect for **All devices**. On a device's own page,
   turn off **Sync with All devices** to give it a different effect.
@@ -61,17 +63,17 @@ Windows SmartScreen may warn about an unsigned app the first time; choose
 - **Settings**: start with Windows, keep running in the tray, key-press
   lighting, and the status of each device source.
 
-Closing the window keeps ChromaLite in the system tray. Click the tray icon to
+Closing the window keeps Prismatic in the system tray. Click the tray icon to
 reopen it, or right-click → **Exit** to quit (lighting then goes back to
 Synapse / Windows).
 
-Settings and imported effects live in `%APPDATA%\ChromaLite`.
+Settings and imported effects live in `%APPDATA%\Prismatic` (carried over automatically from ChromaLite).
 
 ## About Dynamic Lighting devices
 
 Windows only lets the app **in the foreground** control Dynamic Lighting
 devices (background control is reserved for apps installed from a package
-with special permission). So non-Razer devices follow ChromaLite while its
+with special permission). So non-Razer devices follow Prismatic while its
 window is active, and Windows takes them back otherwise; the app shows these
 devices as *Paused* meanwhile. Razer devices aren't affected — they're
 controlled through Synapse in the background.
@@ -104,7 +106,7 @@ Requires Python 3.10+.
 
 ```
 pip install -r requirements.txt
-pyw chromalite.pyw
+pyw prismatic.pyw
 ```
 
 Build the single-file `.exe` into `dist\` (creates a local build environment
@@ -115,11 +117,11 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 If pip fails with a long-path error, point the build environment at a shorter
-folder first: `$env:CHROMALITE_VENV = "C:\clb"`.
+folder first: `$env:PRISMATIC_VENV = "C:\clb"`.
 
 ## How it works
 
-- `chromalite.pyw` — app entry: the window (an HTML interface shown with
+- `prismatic.pyw` — app entry: the window (an HTML interface shown with
   pywebview / WebView2), the bridge the interface calls, the tray and startup.
 - `ui/` — the interface (HTML, CSS, JavaScript; no frameworks).
 - `engine.py` — settings, built-in effects and the render loop: collects
