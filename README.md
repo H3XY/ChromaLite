@@ -17,10 +17,13 @@ from other brands through Windows Dynamic Lighting, and play your old
 - **Works across brands**
   - **Razer** devices through the Razer Chroma SDK that comes with Synapse —
     including while Prismatic runs in the background.
+  - **Razer without Synapse:** supported models (BlackWidow V4 Pro,
+    DeathAdder V2, Firefly V2) are controlled **directly over USB** when
+    Synapse isn't installed or running — in the background too.
   - **Logitech, Corsair, SteelSeries, HyperX, ASUS and more** through Windows 11
     **Dynamic Lighting**, for any device that supports it.
   - A device is only ever controlled one way: Razer devices use Synapse when
-    it's installed, and fall back to Dynamic Lighting when it isn't.
+    it's available, then direct USB, then Dynamic Lighting.
 - **Built-in effects:** Static, Breathing, Duo Pulse, Spectrum Cycle, Rainbow
   Wave, Gradient Wave, Starlight, Off — with colors, brightness and speed.
 - **Plays Chroma Studio exports (`.ChromaEffects`)**, including layered effects
@@ -38,8 +41,9 @@ from other brands through Windows Dynamic Lighting, and play your old
 ## Requirements
 
 - Windows 10 or 11 (Dynamic Lighting devices need Windows 11).
-- For Razer devices: Razer Synapse installed, with its **Razer Chroma SDK**
-  services running. The Synapse window itself doesn't need to work or be open.
+- For Razer devices: either Razer Synapse installed (its **Razer Chroma SDK**
+  services must be running; the Synapse window itself doesn't need to work or
+  be open), or — for the models listed above — nothing at all.
 - Microsoft Edge WebView2 Runtime (built into Windows 11; most Windows 10 PCs
   already have it).
 
@@ -90,7 +94,13 @@ Windows, check *Settings → Personalization → Dynamic Lighting*.
 aren't running. Reinstall or repair Synapse, or start the *Razer Chroma SDK
 Server* service.
 
-**A device isn't listed.** Razer devices need Synapse; other brands need
+**Razer direct USB says "Razer Synapse is running".** Direct USB control
+steps aside while Synapse's app is open, because two programs writing to the
+same device makes it flicker. Close Synapse fully (tray icon → Exit), or let
+Prismatic use Synapse's Chroma SDK instead.
+
+**A device isn't listed.** Razer devices need Synapse unless they're one of the
+directly supported models; other brands need
 Windows 11 Dynamic Lighting support (check *Settings → Personalization →
 Dynamic Lighting* — if the device isn't listed there, Windows can't control
 it).
@@ -131,6 +141,8 @@ folder first: `$env:PRISMATIC_VENV = "C:\clb"`.
   on a shared desk layout, so effects flow across devices.
 - `backend_razer.py` — Razer devices via the Chroma SDK REST API
   (`CHROMA_CUSTOM2` frames, heartbeat), with device names from Windows.
+- `backend_razer_usb.py` — supported Razer devices directly over USB (HID
+  feature reports, per-model LED layouts), used when Synapse isn't available.
 - `backend_dynlight.py` — any brand via Windows Dynamic Lighting (LampArray),
   using each lamp's real position and key mapping.
 - `chroma_effects.py` — the `.ChromaEffects` reader (a zip holding one XML

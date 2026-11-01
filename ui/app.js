@@ -76,7 +76,8 @@ function confirmModal(title, text, okLabel, onOk) {
   document.body.appendChild(bg);
 }
 
-function sourceKind(src) { return src.ok ? "ok" : src.status === "Turned off" ? "off" : "warn"; }
+function sourceKind(src) { return src.ok ? "ok" : src.status === "Turned off" || src.standby ? "off" : "warn"; }
+const source = (name) => S.sources.find((s) => s.name === name) || { name, ok: false, status: "" };
 
 /* Thumbnail background for an effect file, from colors sampled out of the effect itself */
 function paletteStyle(name) {
@@ -312,7 +313,7 @@ function settingRow(icon, title, desc, key, on) {
 
 function pageSettings() {
   const st = S.settings;
-  const razer = S.sources[0], dl = S.sources[1];
+  const razer = source("Razer Chroma"), usb = source("Razer direct USB"), dl = source("Windows Dynamic Lighting");
   return head("Preferences", "Settings", "") + `<div class="settings">
     <div><h2>General</h2><div class="panel">
       ${settingRow(I.power, "Start with Windows", "Launch Prismatic in the tray when you sign in.", "start_with_windows", st.start_with_windows)}
@@ -324,6 +325,9 @@ function pageSettings() {
     <div><h2>Device sources</h2><div class="panel">
       <div class="row"><div class="ico">${I.chip}</div><div class="txt"><b>Razer Chroma <span class="dot ${sourceKind(razer)}" style="display:inline-block;margin-left:6px"></span></b>
         <span>${esc(razer.status)}</span><span>Controls Razer devices through Razer Synapse, including while Prismatic is in the tray.</span></div></div>
+      ${settingRow(I.chip, `Razer direct USB <span class="dot ${sourceKind(usb)}" style="display:inline-block;margin-left:6px"></span>`,
+        `${esc(usb.status)}. When Synapse isn't installed or running, Prismatic controls supported Razer devices itself (BlackWidow V4 Pro, DeathAdder V2, Firefly V2) — in the background too. It steps aside while Synapse is running so the two don't fight.`,
+        "usb_control", st.usb_control)}
       ${settingRow(I.windows, `Windows Dynamic Lighting <span class="dot ${sourceKind(dl)}" style="display:inline-block;margin-left:6px"></span>`,
         `${esc(dl.status)}. Controls devices from Logitech, Corsair, SteelSeries, HyperX, ASUS and more that support Windows 11 Dynamic Lighting. Windows only lets the app in front control these, so they follow Prismatic while its window is active.`,
         "dynamic_lighting", st.dynamic_lighting)}
