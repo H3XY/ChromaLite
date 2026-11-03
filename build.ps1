@@ -1,4 +1,10 @@
-# Builds dist\Prismatic.exe (a single file, no Python needed to run it).
+# Builds Prismatic as a folder (dist\Prismatic\Prismatic.exe + its files) and zips it
+# into dist\Prismatic-<version>-windows.zip. No Python needed to run the result.
+#
+# A folder build is used instead of a single self-extracting .exe on purpose: the
+# single-file format unpacks itself to a temp folder at launch, which antivirus
+# heuristics often mistake for a malware "dropper".
+#
 # Usage:  powershell -ExecutionPolicy Bypass -File build.ps1
 # Set $env:PRISMATIC_VENV to put the build environment elsewhere (e.g. a
 # shorter path if pip hits Windows' 260-character path limit).
@@ -18,19 +24,28 @@ if (-not (Test-Path $py)) {
 Run $py -m ensurepip --upgrade
 Run $py -m pip install --quiet -r requirements.txt -r requirements-build.txt
 
+$work = Join-Path $venv "pyi-build"
+New-Item -ItemType Directory -Force $work | Out-Null
 Run $py tools\make_icon.py
+$versionFile = Join-Path $work "version_info.txt"
+$version = (& $py tools\make_version_info.py $versionFile) -replace '^version ', ''
 $icon = (Resolve-Path assets\prismatic.ico).Path
 $ui = (Resolve-Path ui).Path
 
-Run $py -m PyInstaller --noconfirm --clean --onefile --windowed `
+Run $py -m PyInstaller --noconfirm --clean --onedir --windowed `
     --name Prismatic `
     --icon $icon `
+    --version-file (Resolve-Path $versionFile).Path `
     --add-data "$icon;assets" `
     --add-data "$ui;ui" `
     --collect-submodules winrt `
     --hidden-import winrt.windows.foundation.collections `
     --hidden-import winrt.windows.foundation.numerics `
-    --workpath (Join-Path $venv "pyi-build") --specpath (Join-Path $venv "pyi-build") `
+    --workpath $work --specpath $work `
     prismatic.pyw
 
-Write-Host "Built $(Resolve-Path dist\Prismatic.exe)"
+$zip = "dist\Prismatic-$version-windows.zip"
+if (Test-Path $zip) { Remove-Item $zip }
+Compress-Archive -Path dist\Prismatic -DestinationPath $zip
+Write-Host "Built $(Resolve-Path dist\Prismatic\Prismatic.exe)"
+Write-Host "Zipped $(Resolve-Path $zip)"

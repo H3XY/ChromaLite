@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import webbrowser
+import winreg
 
 import webview
 
@@ -28,7 +29,7 @@ from backend_razer import RazerBackend
 from backend_razer_usb import RazerUsbBackend
 
 APP_NAME = "Prismatic"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 REPO_URL = "https://github.com/H3XY/Prismatic"
 LINKS = {"repo": REPO_URL, "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases"}
 
@@ -36,9 +37,11 @@ FROZEN = getattr(sys, "frozen", False)  # running as the PyInstaller .exe
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "prismatic.ico")
 UI_INDEX = os.path.join(BASE_DIR, "ui", "index.html")
+# "Start with Windows" uses the standard per-user Run registry entry.
+RUN_KEY, RUN_VALUE = r"Software\Microsoft\Windows\CurrentVersion\Run", "Prismatic"
+# Older versions used startup-folder scripts instead; they're replaced on first run.
 STARTUP_DIR = os.path.join(en.APPDATA, r"Microsoft\Windows\Start Menu\Programs\Startup")
-STARTUP_VBS = os.path.join(STARTUP_DIR, "Prismatic.vbs")
-LEGACY_STARTUP_VBS = os.path.join(STARTUP_DIR, "ChromaLite.vbs")  # created by the app's earlier name
+LEGACY_STARTUP_SCRIPTS = [os.path.join(STARTUP_DIR, n) for n in ("Prismatic.vbs", "ChromaLite.vbs")]
 
 WINDOW_BG = "#07090D"
 
@@ -83,23 +86,36 @@ def effect_palette(fx, n=7):
     return ["#" + rgb_hex(c) for c in lit]
 
 
+def startup_command():
+    if FROZEN:
+        return f'"{sys.executable}" --minimized'
+    exe = sys.executable
+    if exe.lower().endswith("python.exe"):
+        exe = exe[:-10] + "pythonw.exe"
+    return f'"{exe}" "{os.path.abspath(__file__)}" --minimized'
+
+
+def _startup_value():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            return winreg.QueryValueEx(k, RUN_VALUE)[0]
+    except OSError:
+        return None
+
+
 def startup_enabled():
-    return os.path.exists(STARTUP_VBS)
+    return _startup_value() is not None
 
 
 def set_startup(enabled):
-    if enabled:
-        if FROZEN:
-            args = f'""{sys.executable}""'
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        if enabled:
+            winreg.SetValueEx(k, RUN_VALUE, 0, winreg.REG_SZ, startup_command())
         else:
-            exe = sys.executable
-            if exe.lower().endswith("python.exe"):
-                exe = exe[:-10] + "pythonw.exe"
-            args = f'""{exe}"" ""{os.path.abspath(__file__)}""'
-        with open(STARTUP_VBS, "w", encoding="utf-8") as f:
-            f.write(f'CreateObject("WScript.Shell").Run "{args} --minimized", 0, False\n')
-    elif os.path.exists(STARTUP_VBS):
-        os.remove(STARTUP_VBS)
+            try:
+                winreg.DeleteValue(k, RUN_VALUE)
+            except FileNotFoundError:
+                pass
 
 
 def style_title_bar(window):
@@ -385,12 +401,15 @@ def migrate_legacy_config():
                 except OSError:
                     pass
                 break
-    if os.path.exists(LEGACY_STARTUP_VBS):
-        try:
-            os.remove(LEGACY_STARTUP_VBS)
-            set_startup(True)  # point it at this copy of the app instead
-        except OSError:
-            pass
+    try:
+        legacy = [p for p in LEGACY_STARTUP_SCRIPTS if os.path.exists(p)]
+        for p in legacy:
+            os.remove(p)
+        current = _startup_value()
+        if legacy or (current is not None and current != startup_command()):
+            set_startup(True)  # (re)point "start with Windows" at this copy of the app
+    except OSError:
+        pass
 
 
 def already_running():

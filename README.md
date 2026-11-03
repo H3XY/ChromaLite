@@ -49,11 +49,18 @@ from other brands through Windows Dynamic Lighting, and play your old
 
 ## Install
 
-Download `Prismatic.exe` from the [Releases](../../releases) page and run it.
-No installer, no Python needed.
+1. Download `Prismatic-<version>-windows.zip` from the [Releases](../../releases)
+   page.
+2. Extract it anywhere (for example `Documents\Prismatic`) and run
+   `Prismatic.exe` inside the extracted folder. Keep the folder together — the
+   `.exe` needs the files next to it.
+
+No installer, no Python needed. To update, replace the folder with the new one;
+your settings live elsewhere and carry over.
 
 Windows SmartScreen may warn about an unsigned app the first time; choose
-**More info → Run anyway**.
+**More info → Run anyway**. See *Antivirus warnings* below if your antivirus
+flags the app.
 
 ## Using it
 
@@ -83,6 +90,17 @@ devices as *Paused* meanwhile. Razer devices aren't affected — they're
 controlled through Synapse in the background.
 
 ## Troubleshooting
+
+**Antivirus warnings.** Prismatic isn't code-signed yet, and apps packaged with
+PyInstaller that run in the tray and watch key presses can trip antivirus
+*heuristics* (detections ending in `!ml` or labeled "dropper" are guesses, not
+known malware). Version 2.0.0–2.1.0 shipped as a single self-extracting `.exe`,
+which Microsoft Defender flagged as `Trojan:Win32/Bearfoos.A!ml`; from 2.2.0 the
+app ships as a folder, which avoids the main trigger. You can check any release
+yourself: each release lists its files' SHA-256 hashes, and you can look a hash
+up on [VirusTotal](https://www.virustotal.com) or build the app from this
+source. False positives can be reported to Microsoft at
+[microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission).
 
 **Lights hyper-flash, even on a solid color.** Another program is fighting over
 your devices. The usual culprits are ASUS Armoury Crate / Aura Sync, other RGB
@@ -119,8 +137,9 @@ pip install -r requirements.txt
 pyw prismatic.pyw
 ```
 
-Build the single-file `.exe` into `dist\` (creates a local build environment
-with PyInstaller):
+Build the app into `dist\Prismatic\` and the release zip
+`dist\Prismatic-<version>-windows.zip` (creates a local build environment with
+PyInstaller):
 
 ```
 powershell -ExecutionPolicy Bypass -File build.ps1
@@ -149,7 +168,8 @@ folder first: `$env:PRISMATIC_VENV = "C:\clb"`.
   document of layers → regions → device cells), the retargeting onto your
   devices, the layer renderers, plus key-press polling and the audio meter.
 - `tray.py` — the tray icon (Win32 API via ctypes).
-- `tools/make_icon.py` — generates the app icon.
+- `tools/make_icon.py` — generates the app icon; `tools/make_version_info.py`
+  — the version details shown in the `.exe`'s Properties.
 
 ## License
 
