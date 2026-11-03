@@ -21,6 +21,7 @@ import winreg
 
 import webview
 
+import buttons
 import chroma_effects as ce
 import engine as en
 import tray
@@ -29,7 +30,7 @@ from backend_razer import RazerBackend
 from backend_razer_usb import RazerUsbBackend
 
 APP_NAME = "Prismatic"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 REPO_URL = "https://github.com/H3XY/Prismatic"
 LINKS = {"repo": REPO_URL, "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases"}
 
@@ -329,6 +330,45 @@ class Api:
         self._app.engine.update(tray_hint_shown=True)
         en.save_settings(self._app.engine.snapshot())
 
+    # buttons ---------------------------------------------------------------
+    def get_buttons(self):
+        mgr = self._app.buttons
+        last = mgr.last_pressed
+        return {
+            "triggers": [{"id": t, "name": n} for t, n in buttons.TRIGGERS],
+            "config": self._app.engine.snapshot()["buttons"],
+            "media": list(buttons.MEDIA),
+            "last_pressed": {"id": last[0], "ago": round(time.time() - last[1], 2)} if last else None,
+            "status": mgr.status,
+        }
+
+    def set_button(self, trigger, action):
+        if trigger in buttons.TRIGGER_IDS:
+            eng = self._app.engine
+            cfg = dict(eng.snapshot()["buttons"])
+            clean = buttons.clean_action(action)
+            if clean["type"] == "default":
+                cfg.pop(trigger, None)
+            else:
+                cfg[trigger] = clean
+            eng.update(buttons=cfg)
+            en.save_settings(eng.snapshot())
+            self._app.buttons.reconfigure()
+        return self.get_buttons()
+
+    def test_button_action(self, action):
+        clean = buttons.clean_action(action)
+        if clean["type"] not in ("default", "disabled"):
+            # give the window a moment to lose focus-sensitive state before input is sent
+            threading.Timer(0.6, self._app.buttons.test, args=(clean,)).start()
+        return clean["type"]
+
+    def browse_for_app(self):
+        paths = self._app.window.create_file_dialog(
+            webview.FileDialog.OPEN, allow_multiple=False,
+            file_types=("Programs (*.exe;*.lnk;*.bat;*.cmd)", "All files (*.*)"))
+        return paths[0] if paths else None
+
 
 # ---------------------------------------------------------------- app
 class App:
@@ -337,6 +377,7 @@ class App:
         self.dynlight = DynamicLightingBackend()
         self.razer_usb = RazerUsbBackend()
         self.engine = en.Engine(en.load_settings(), self.razer, self.dynlight, self.razer_usb)
+        self.buttons = buttons.ButtonManager(lambda: self.engine.snapshot()["buttons"])
         self.api = Api(self)
         self.quitting = False
         self.window = webview.create_window(
@@ -351,6 +392,7 @@ class App:
         self.dynlight.start()
         self.razer_usb.start()
         self.engine.start()
+        self.buttons.start()
         self.tray_ok = self.tray.start()
         webview.start(gui="edgechromium", private_mode=False,
                       storage_path=os.path.join(en.CONFIG_DIR, "webview"))
@@ -362,6 +404,7 @@ class App:
         self.razer.stop()
         self.dynlight.stop()
         self.razer_usb.stop()
+        self.buttons.stop()
 
     def show(self):
         self.window.show()
