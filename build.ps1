@@ -7,7 +7,8 @@
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File build.ps1
 # Set $env:PRISMATIC_VENV to put the build environment elsewhere (e.g. a
-# shorter path if pip hits Windows' 260-character path limit).
+# shorter path if pip hits Windows' 260-character path limit), and
+# $env:PRISMATIC_PYTHON to build with a specific Python (the GitHub build does).
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -19,7 +20,7 @@ function Run($exe) {
 $venv = if ($env:PRISMATIC_VENV) { $env:PRISMATIC_VENV } else { ".venv" }
 $py = Join-Path $venv "Scripts\python.exe"
 if (-not (Test-Path $py)) {
-    Run py -3 -m venv $venv
+    if ($env:PRISMATIC_PYTHON) { Run $env:PRISMATIC_PYTHON -m venv $venv } else { Run py -3 -m venv $venv }
 }
 Run $py -m ensurepip --upgrade
 Run $py -m pip install --quiet -r requirements.txt -r requirements-build.txt
