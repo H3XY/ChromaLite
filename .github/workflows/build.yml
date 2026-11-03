@@ -24,7 +24,9 @@ jobs:
       contents: write  # only used to attach the zip to a draft release on tag pushes
     env:
       PRISMATIC_PYTHON: python
-      PRISMATIC_VENV: C:\pbuild  # short path: avoids Windows' 260-character limit
+      # Short path (Windows' 260-character limit) on the same drive as the checkout,
+      # which PyInstaller needs to relate its spec folder to the sources.
+      PRISMATIC_VENV: ${{ github.workspace }}\..\pb
     steps:
       - uses: actions/checkout@v4
 
