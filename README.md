@@ -35,6 +35,9 @@ from other brands through Windows Dynamic Lighting, and play your old
   and speed, or let them all sync to one.
 - **Live previews** of every device in the app, an **effect library** with
   color thumbnails, and smooth, flicker-free output.
+- **Button customization:** give your mouse's side buttons and keyboard macro
+  keys new jobs — a key or shortcut, media controls, opening an app or
+  website, typing text, or a sequence of steps.
 - **Runs in the system tray** like Synapse: closing the window keeps your
   lighting on. Optional start with Windows. One instance at a time.
 
@@ -71,6 +74,12 @@ flags the app.
 - **Effect Library** holds your Chroma Studio effects: **Import effects** adds
   `.ChromaEffects` files, and each can be applied to all devices or picked per
   device under *Chroma Studio effects*.
+- **Buttons** customizes your mouse's Back/Forward side buttons and keyboard
+  macro keys. Click **Edit** on a row to choose what it does, and **Test** to
+  try it. Macro keys work through **F13–F24**, keys no keyboard actually has:
+  in Razer Synapse, set each macro key to a different one (for example
+  M1 → F13), then press it on the Buttons page to see which row lights up.
+  Customized buttons work while Prismatic is running, including from the tray.
 - **Settings**: start with Windows, keep running in the tray, key-press
   lighting, and the status of each device source.
 
@@ -175,6 +184,10 @@ same way, so you can download a test build from the run's artifacts.
 - `chroma_effects.py` — the `.ChromaEffects` reader (a zip holding one XML
   document of layers → regions → device cells), the retargeting onto your
   devices, the layer renderers, plus key-press polling and the audio meter.
+- `buttons.py` — button customization: F13–F24 through Windows' standard
+  hotkey API (no keyboard hook), mouse side buttons through a low-level mouse
+  hook that's only installed while one is customized, and the actions
+  (simulated keys, media keys, typing, opening apps/links, sequences).
 - `tray.py` — the tray icon (Win32 API via ctypes).
 - `tools/make_icon.py` — generates the app icon; `tools/make_version_info.py`
   — the version details shown in the `.exe`'s Properties.

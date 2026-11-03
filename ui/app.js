@@ -42,6 +42,8 @@ const I = {
   chip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
   windows: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5l7.5-1v7H3zM13 4.2L21 3v8.5h-8zM3 13h7.5v7l-7.5-1zM13 13h8v8l-8-1.2z"/></svg>',
   github: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.7-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7 3.6 3.6 0 0 1 .1-2.7s.8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>',
+  mouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg>',
+  key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 15h6"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14l2-2 2 2 2-3"/></svg>',
 };
 const LOGO = (id) => `<svg viewBox="0 0 48 48" class="logo"><defs><linearGradient id="pe${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3b5c"/><stop offset=".2" stop-color="#ffb000"/><stop offset=".4" stop-color="#3ddc6a"/><stop offset=".6" stop-color="#2fd2ff"/><stop offset=".8" stop-color="#2f8cff"/><stop offset="1" stop-color="#9b5cff"/></linearGradient><linearGradient id="pc${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cb0ff"/><stop offset="1" stop-color="#2f8cff"/></linearGradient></defs><path d="M24 8.5 L38.5 34.5 L9.5 34.5 Z" fill="#121a28" stroke="url(#pe${id})" stroke-width="4.4" stroke-linejoin="round"/><path d="M24 18.6 L30.1 29.5 L17.9 29.5 Z" fill="url(#pc${id})"/></svg>`;
@@ -118,7 +120,8 @@ function renderShell() {
 
 function renderSidebar() {
   const items = [["devices", "Devices", I.devices, S.devices.length], ["lighting", "Lighting", I.lighting, ""],
-    ["library", "Effect Library", I.library, S.library.length], ["settings", "Settings", I.settings, ""], ["about", "About", I.about, ""]];
+    ["library", "Effect Library", I.library, S.library.length], ["buttons", "Buttons", I.mouse, ""],
+    ["settings", "Settings", I.settings, ""], ["about", "About", I.about, ""]];
   const active = route.page === "lighting" && route.target !== "all" ? "devices" : route.page;
   $("#nav").innerHTML = items.map(([id, label, icon, count]) =>
     `<button class="${active === id ? "active" : ""}" data-act="nav" data-arg="${id}">${icon}<span>${label}</span>${count !== "" ? `<span class="count">${count}</span>` : ""}</button>`).join("");
@@ -131,7 +134,7 @@ function renderPage() {
   previews = [];
   const main = $("#main");
   const scroll = main.scrollTop;
-  const pages = { devices: pageDevices, lighting: pageLighting, library: pageLibrary, settings: pageSettings, about: pageAbout };
+  const pages = { devices: pageDevices, lighting: pageLighting, library: pageLibrary, buttons: pageButtons, settings: pageSettings, about: pageAbout };
   main.innerHTML = `<div class="page">${(pages[route.page] || pageDevices)()}</div>`;
   main.scrollTop = scroll;
   document.querySelectorAll("canvas.preview").forEach((c) => previews.push({ canvas: c, ids: c.dataset.ids.split(",").filter(Boolean) }));
@@ -311,6 +314,209 @@ function settingRow(icon, title, desc, key, on) {
     <label class="switch"><input type="checkbox" data-act="setting" data-arg="${key}" ${on ? "checked" : ""}><span></span></label></div>`;
 }
 
+/* ------------------------------------------------------------------ buttons */
+let BTN = null;           // {triggers, config, media, last_pressed, status}
+const MEDIA_NAMES = { play_pause: "Play / pause", next: "Next track", previous: "Previous track", stop: "Stop",
+  volume_up: "Volume up", volume_down: "Volume down", mute: "Mute" };
+const ACTION_TYPES = [["default", "Default (do what it normally does)"], ["disabled", "Disabled (do nothing)"],
+  ["keys", "Press a key or shortcut"], ["media", "Media control"], ["launch", "Open an app, file or website"],
+  ["text", "Type text"], ["sequence", "Sequence of steps"]];
+const STEP_TYPES = [["keys", "Shortcut"], ["text", "Type text"], ["media", "Media"], ["launch", "Open"], ["delay", "Wait"]];
+
+function describeAction(a) {
+  if (!a || a.type === "default") return "Default";
+  switch (a.type) {
+    case "disabled": return "Disabled";
+    case "keys": return "Press " + (a.label || "a shortcut");
+    case "media": return MEDIA_NAMES[a.media] || "Media control";
+    case "launch": return "Open " + a.target;
+    case "text": return `Type "${a.text.length > 40 ? a.text.slice(0, 40) + "…" : a.text}"`;
+    case "delay": return `Wait ${a.ms} ms`;
+    case "sequence": return `${a.steps.length}-step sequence: ` + a.steps.map(describeAction).join(", ");
+  }
+  return "Default";
+}
+
+async function loadButtons() { try { BTN = await api().get_buttons(); } catch (e) { BTN = null; } }
+
+function buttonRow(t) {
+  const a = BTN.config[t.id];
+  const custom = a && a.type !== "default";
+  const name = t.id.startsWith("mouse") ? t.name.replace("Mouse: ", "") : t.name;
+  return `<div class="btn-row ${custom ? "custom" : ""}" data-trigger="${esc(t.id)}">
+    <div class="ico">${t.id.startsWith("mouse") ? I.mouse : I.key}</div>
+    <div class="txt"><b>${esc(name)}</b><span>${esc(describeAction(a))}</span></div>
+    <span class="just">Pressed</span>
+    <button class="btn small" data-act="edit-button" data-arg="${esc(t.id)}">Edit</button></div>`;
+}
+
+function pageButtons() {
+  if (!BTN) {
+    loadButtons().then(renderPage);
+    return head("Customize", "Buttons", "") + `<div class="panel"><div class="empty"><div class="spinner"></div></div></div>`;
+  }
+  const mouse = BTN.triggers.filter((t) => t.id.startsWith("mouse"));
+  const keys = BTN.triggers.filter((t) => !t.id.startsWith("mouse"));
+  return head("Customize", "Buttons", "Give your mouse side buttons and keyboard macro keys new jobs. Press a button and its row lights up.") +
+    `<div class="settings">
+      <div><h2>Mouse side buttons</h2><div class="panel btn-list">${mouse.map(buttonRow).join("")}</div></div>
+      <div><h2>Keyboard macro keys</h2>
+        <div class="notice info">${I.info}<div>Prismatic customizes macro keys through <b>F13–F24</b> — keys no keyboard actually has, so nothing else uses them.
+        In Razer Synapse, set each macro key to a different one (for example M1 → F13, M2 → F14), then press it here to see which row lights up.</div></div>
+        <div class="panel btn-list">${keys.map(buttonRow).join("")}</div></div>
+    </div>`;
+}
+
+async function pollButtons() {
+  if (route.page !== "buttons" || document.hidden || !BTN) return;
+  try {
+    const b = await api().get_buttons();
+    BTN.last_pressed = b.last_pressed;
+    document.querySelectorAll(".btn-row").forEach((row) => {
+      const lp = b.last_pressed;
+      row.classList.toggle("pressed", !!lp && lp.id === row.dataset.trigger && lp.ago < 1.5);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+/* ---- editor ---- */
+function keyLabel(e) {
+  const names = { " ": "Space", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Escape: "Esc" };
+  if (names[e.key]) return names[e.key];
+  if (e.key && e.key.length === 1) return e.key.toUpperCase();
+  return e.key || e.code;
+}
+
+function recordShortcut(el, onDone) {
+  el.classList.add("listening");
+  el.textContent = "Press a key or shortcut…";
+  const handler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return; // wait for the main key
+    const keys = [], parts = [];
+    if (e.ctrlKey) { keys.push(17); parts.push("Ctrl"); }
+    if (e.shiftKey) { keys.push(16); parts.push("Shift"); }
+    if (e.altKey) { keys.push(18); parts.push("Alt"); }
+    if (e.metaKey) { keys.push(91); parts.push("Win"); }
+    keys.push(e.keyCode);
+    parts.push(keyLabel(e));
+    el.removeEventListener("keydown", handler, true);
+    el.classList.remove("listening");
+    onDone({ keys, label: parts.join(" + ") });
+  };
+  el.addEventListener("keydown", handler, true);
+  el.focus();
+}
+
+function stepEditor(step, i) {
+  // the input fields for one action (the whole action, or one step of a sequence)
+  const t = step.type;
+  if (t === "keys") {
+    const shown = step.keys && step.keys.length
+      ? step.label.split(" + ").map((k) => `<kbd>${esc(k)}</kbd>`).join("+") : "Click, then press a key or shortcut";
+    return `<div class="recorder" tabindex="0" data-rec="${i}">${shown}</div>`;
+  }
+  if (t === "media") {
+    return `<select data-f="media" data-i="${i}">${Object.entries(MEDIA_NAMES).map(([k, v]) =>
+      `<option value="${k}" ${step.media === k ? "selected" : ""}>${v}</option>`).join("")}</select>`;
+  }
+  if (t === "launch") {
+    return `<div class="row2"><input type="text" data-f="target" data-i="${i}" placeholder="App path, file or https:// link" value="${esc(step.target || "")}">
+      <button class="btn small" data-browse="${i}">Browse…</button></div>`;
+  }
+  if (t === "text") return `<textarea data-f="text" data-i="${i}" placeholder="Text to type">${esc(step.text || "")}</textarea>`;
+  if (t === "delay") {
+    return `<input type="number" min="0" max="10000" step="50" data-f="ms" data-i="${i}" value="${Number(step.ms || 200)}"> <span class="hint">milliseconds</span>`;
+  }
+  return "";
+}
+
+function newStep(type) {
+  return { keys: { type: "keys", keys: [], label: "" }, media: { type: "media", media: "play_pause" },
+    launch: { type: "launch", target: "" }, text: { type: "text", text: "" }, delay: { type: "delay", ms: 200 } }[type] || { type };
+}
+
+function openButtonEditor(triggerId) {
+  const t = BTN.triggers.find((x) => x.id === triggerId);
+  let draft = JSON.parse(JSON.stringify(BTN.config[triggerId] || { type: "default" }));
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  document.body.appendChild(bg);
+  const steps = () => (draft.type === "sequence" ? draft.steps : [draft]);
+  const fieldLabel = { keys: "Shortcut", media: "Media control", launch: "What to open", text: "Text to type" };
+
+  const render = () => {
+    let body = `<div class="field"><label>When I press it</label><select data-type="1">${ACTION_TYPES.map(([k, v]) =>
+      `<option value="${k}" ${draft.type === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>`;
+    if (draft.type === "sequence") {
+      body += `<div class="steps">${draft.steps.map((s, i) => `<div class="step"><div class="n">${i + 1}</div>
+        <select data-steptype="${i}">${STEP_TYPES.map(([k, v]) => `<option value="${k}" ${s.type === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <div class="grow field">${stepEditor(s, i)}</div>
+        <button class="btn small ghost danger" data-remove="${i}" title="Remove step">${I.trash}</button></div>`).join("")}</div>
+        <button class="btn small" data-add="1">+ Add step</button>`;
+    } else if (!["default", "disabled"].includes(draft.type)) {
+      body += `<div class="field"><label>${fieldLabel[draft.type]}</label>${stepEditor(draft, 0)}</div>`;
+    }
+    const canTest = !["default", "disabled"].includes(draft.type);
+    const intro = t.id.startsWith("mouse") ? "Choose what this side button does."
+      : `Choose what happens when a key set to ${esc(t.name)} is pressed.`;
+    bg.innerHTML = `<div class="modal wide"><h3>${esc(t.name)}</h3><p>${intro}</p>
+      <div class="mbody">${body}</div>
+      <div class="mfoot">${canTest ? `<button class="btn" data-test="1">Test</button>` : ""}<div class="spacer"></div>
+        <button class="btn ghost" data-cancel="1">Cancel</button><button class="btn primary" data-save="1">Save</button></div></div>`;
+  };
+
+  const setField = (el) => {
+    const s = steps()[+el.dataset.i];
+    s[el.dataset.f] = el.dataset.f === "ms" ? Number(el.value) : el.value;
+  };
+  bg.addEventListener("change", (e) => {
+    const el = e.target;
+    if (el.dataset.type) {
+      const type = el.value;
+      draft = type === "sequence" ? { type, steps: draft.type === "sequence" ? draft.steps : [newStep("keys")] } : newStep(type);
+      return render();
+    }
+    if (el.dataset.steptype !== undefined) { draft.steps[+el.dataset.steptype] = newStep(el.value); return render(); }
+    if (el.dataset.f) setField(el);
+  });
+  bg.addEventListener("input", (e) => { if (e.target.dataset.f && e.target.tagName !== "SELECT") setField(e.target); });
+  bg.addEventListener("click", async (e) => {
+    if (e.target === bg) return bg.remove();
+    const el = e.target.closest("[data-rec],[data-browse],[data-remove],[data-add],[data-test],[data-cancel],[data-save]");
+    if (!el) return;
+    if (el.dataset.rec !== undefined) {
+      const i = +el.dataset.rec;
+      return recordShortcut(el, (r) => { Object.assign(steps()[i], r); render(); });
+    }
+    if (el.dataset.browse !== undefined) {
+      const path = await api().browse_for_app();
+      if (path) { steps()[+el.dataset.browse].target = path; render(); }
+      return;
+    }
+    if (el.dataset.remove !== undefined) {
+      draft.steps.splice(+el.dataset.remove, 1);
+      if (!draft.steps.length) draft = { type: "default" };
+      return render();
+    }
+    if (el.dataset.add) { draft.steps.push(newStep("keys")); return render(); }
+    if (el.dataset.test) {
+      const r = await api().test_button_action(draft);
+      toast(r === "default" ? "Nothing to test yet — finish setting it up first" : "Testing in a moment…", r === "default");
+      return;
+    }
+    if (el.dataset.cancel) return bg.remove();
+    if (el.dataset.save) {
+      BTN = await api().set_button(triggerId, draft);
+      bg.remove();
+      toast(`${t.name}: ${describeAction(BTN.config[triggerId])}`);
+      renderPage();
+    }
+  });
+  render();
+}
+
 function pageSettings() {
   const st = S.settings;
   const razer = source("Razer Chroma"), usb = source("Razer direct USB"), dl = source("Windows Dynamic Lighting");
@@ -397,6 +603,7 @@ function onClick(e) {
       return confirmModal("Remove effect?", `"${arg}" will be removed from your library. Devices using it switch to Rainbow Wave.`, "Remove",
         () => act(api().delete_effect(arg)).then(loadLibrary));
     case "link": return api().open_link(arg);
+    case "edit-button": return openButtonEditor(arg);
   }
 }
 
@@ -590,6 +797,7 @@ async function boot() {
   $("#picker").addEventListener("change", onPicker);
   setInterval(frameLoop, 50);
   setInterval(() => refresh(false), 1500);
+  setInterval(pollButtons, 300);
   window.addEventListener("resize", () => drawAll(null));
 }
 

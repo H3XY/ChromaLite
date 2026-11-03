@@ -13,6 +13,7 @@ import random
 import threading
 import time
 
+import buttons
 import chroma_effects as ce
 from backend_razer import RAZER_VID
 
@@ -44,6 +45,7 @@ DEFAULTS = {
     "tray_hint_shown": False,
     "dynamic_lighting": True,
     "usb_control": True,  # control Razer devices directly when Synapse isn't available
+    "buttons": {},  # trigger id (mouse_x1/x2, f13-f24) -> action (see buttons.py)
 }
 
 
@@ -100,6 +102,8 @@ def load_settings():
                 p["effect"] = s["effect"]
             overrides[dev_id] = p
     s["overrides"] = overrides
+    s["buttons"] = {t: buttons.clean_action(act) for t, act in (s.get("buttons") or {}).items()
+                    if t in buttons.TRIGGER_IDS}
     return s
 
 
