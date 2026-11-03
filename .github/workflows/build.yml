@@ -1,0 +1,72 @@
+# Builds Prismatic on GitHub's Windows machines, so every release can be traced
+# to the exact source it was built from (also what code-signing services such as
+# SignPath require).
+#
+# - Pushes to dev/main and pull requests: build and keep the zip as a run artifact.
+# - Pushing a version tag (e.g. v2.3.0): build, then create a DRAFT release with the
+#   zip and its SHA-256 attached. Review the draft and publish it.
+name: Build
+
+on:
+  push:
+    branches: [dev, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # only used to attach the zip to a draft release on tag pushes
+    env:
+      PRISMATIC_PYTHON: python
+      PRISMATIC_VENV: C:\pbuild  # short path: avoids Windows' 260-character limit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Build
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Checksum
+        id: sum
+        shell: pwsh
+        run: |
+          $zip = Get-Item dist\Prismatic-*-windows.zip
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($zip.Name)" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          "### $($zip.Name)`nSHA-256: ``$hash``" >> $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.sum.outputs.name }}
+          path: ${{ steps.sum.outputs.zip }}
+          if-no-files-found: error
+
+      - name: Attach to a draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ZIP: ${{ steps.sum.outputs.zip }}
+          SHA: ${{ steps.sum.outputs.sha256 }}
+        run: |
+          $notes = "Built by GitHub Actions from $env:TAG ($env:GITHUB_SHA): $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID`n`n**SHA-256**: ``$env:SHA``"
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $env:ZIP --clobber
+          } else {
+            gh release create $env:TAG $env:ZIP --draft --verify-tag --title "Prismatic $($env:TAG.TrimStart('v'))" --notes $notes
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

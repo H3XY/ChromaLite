@@ -148,6 +148,14 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 If pip fails with a long-path error, point the build environment at a shorter
 folder first: `$env:PRISMATIC_VENV = "C:\clb"`.
 
+## How releases are built
+
+Release zips are built by GitHub Actions on GitHub's own Windows machines
+(`.github/workflows/build.yml`), not on anyone's PC: pushing a version tag builds
+the app from that exact commit and attaches the zip and its SHA-256 to a draft
+release, with a link to the build log. Every push and pull request is built the
+same way, so you can download a test build from the run's artifacts.
+
 ## How it works
 
 - `prismatic.pyw` — app entry: the window (an HTML interface shown with
